@@ -8,6 +8,8 @@ set -euo pipefail
 # Constants and defaults
 readonly DEFAULT_CONFIG_PATH=".sandbox/config.yaml"
 readonly SANDBOX_VERSION="0.1.0"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CONFIG_PATH="${DEFAULT_CONFIG_PATH}"
 
 # ============================================================================
 # Utility functions
@@ -90,7 +92,12 @@ cmd_run() {
 # ============================================================================
 
 cmd_init() {
-  info "not yet implemented"
+  if [[ -f "${CONFIG_PATH}" ]]; then
+    die "config already exists" 1
+  fi
+  mkdir -p "$(dirname "${CONFIG_PATH}")"
+  cp "${SCRIPT_DIR}/templates/config.yaml" "${CONFIG_PATH}"
+  info "created ${CONFIG_PATH}"
 }
 
 # ============================================================================
@@ -113,12 +120,12 @@ HELPTEXT
 }
 
 parse_args() {
-  local config_path="${DEFAULT_CONFIG_PATH}"
-
   if [[ "${#}" -eq 0 ]]; then
     show_help
     exit 0
   fi
+
+  local command=""
 
   while [[ "${#}" -gt 0 ]]; do
     case "${1}" in
@@ -130,26 +137,32 @@ parse_args() {
         if [[ "${#}" -lt 2 ]]; then
           die "option -f requires an argument" 2
         fi
-        config_path="${2}"
+        CONFIG_PATH="${2}"
         shift 2
         ;;
-      init)
-        cmd_init
-        exit 0
-        ;;
-      build)
-        cmd_build
-        exit 0
-        ;;
-      run)
-        cmd_run
-        exit 0
+      init|build|run)
+        if [[ -n "${command}" ]]; then
+          die "multiple commands specified: '${command}' and '${1}'" 2
+        fi
+        command="${1}"
+        shift
         ;;
       *)
         die "unknown command '${1}'" 2
         ;;
     esac
   done
+
+  if [[ -z "${command}" ]]; then
+    show_help
+    exit 0
+  fi
+
+  case "${command}" in
+    init)  cmd_init ;;
+    build) cmd_build ;;
+    run)   cmd_run ;;
+  esac
 }
 
 # ============================================================================

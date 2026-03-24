@@ -13,7 +13,7 @@ SANDBOX="${PROJECT_ROOT}/sandbox.sh"
 # Build a minimal system path with only essential binaries (bash, env, core utils)
 # We create a temp dir with symlinks to avoid picking up docker/yq from the same dirs
 MOCK_SYSBIN="$(mktemp -d)"
-for bin in bash env cat echo grep sed awk chmod mkdir rm; do
+for bin in bash env cat echo grep sed awk chmod mkdir rm cp dirname pwd; do
   real_path="$(command -v "${bin}" 2>/dev/null || true)"
   if [[ -n "${real_path}" ]]; then
     ln -sf "${real_path}" "${MOCK_SYSBIN}/${bin}"
@@ -207,7 +207,7 @@ fi
 
 echo "# Additional: command stubs and error handling"
 
-for cmd in init build run; do
+for cmd in build run; do
   set +e
   output_all="$(bash "${SANDBOX}" "${cmd}" 2>&1)"
   exit_code=$?
@@ -302,6 +302,90 @@ if grep -q 'eval' "${SANDBOX}"; then
 else
   pass "no eval usage"
 fi
+
+# ============================================================================
+# AC: sandbox init
+# ============================================================================
+
+echo "# AC: sandbox init"
+
+# Test: sandbox init creates .sandbox/config.yaml with expected content
+tmpdir="$(mktemp -d)"
+set +e
+output_all="$(cd "${tmpdir}" && bash "${SANDBOX}" init 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "sandbox init exits with code 0"
+assert_contains "${output_all}" "created .sandbox/config.yaml" "sandbox init prints success message"
+if [[ -f "${tmpdir}/.sandbox/config.yaml" ]]; then
+  pass "sandbox init creates .sandbox/config.yaml"
+else
+  fail "sandbox init creates .sandbox/config.yaml"
+fi
+rm -rf "${tmpdir}"
+
+# Test: sandbox init when config exists exits code 1 with error message
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/.sandbox"
+touch "${tmpdir}/.sandbox/config.yaml"
+set +e
+output_all="$(cd "${tmpdir}" && bash "${SANDBOX}" init 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 1 "${exit_code}" "sandbox init with existing config exits code 1"
+assert_contains "${output_all}" "error: config already exists" "sandbox init with existing config prints error"
+rm -rf "${tmpdir}"
+
+# Test: sandbox init -f custom/path.yaml creates at custom path
+tmpdir="$(mktemp -d)"
+set +e
+output_all="$(cd "${tmpdir}" && bash "${SANDBOX}" init -f custom/path.yaml 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "sandbox init -f custom/path.yaml exits with code 0"
+if [[ -f "${tmpdir}/custom/path.yaml" ]]; then
+  pass "sandbox init -f creates config at custom path"
+else
+  fail "sandbox init -f creates config at custom path"
+fi
+rm -rf "${tmpdir}"
+
+# Test: sandbox -f custom/path.yaml init also works (flag before command)
+tmpdir="$(mktemp -d)"
+set +e
+output_all="$(cd "${tmpdir}" && bash "${SANDBOX}" -f custom/before.yaml init 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "sandbox -f path init exits with code 0"
+if [[ -f "${tmpdir}/custom/before.yaml" ]]; then
+  pass "sandbox -f before command creates config at custom path"
+else
+  fail "sandbox -f before command creates config at custom path"
+fi
+rm -rf "${tmpdir}"
+
+# Test: generated config is valid YAML (parseable by yq)
+tmpdir="$(mktemp -d)"
+output_all="$(cd "${tmpdir}" && bash "${SANDBOX}" init 2>&1)"
+set +e
+yq_output="$(yq eval '.' "${tmpdir}/.sandbox/config.yaml" 2>&1)"
+yq_exit=$?
+set -e
+assert_exit_code 0 "${yq_exit}" "generated config is valid YAML (yq parses it)"
+rm -rf "${tmpdir}"
+
+# Test: generated config contains expected defaults (agent, sdks, packages)
+tmpdir="$(mktemp -d)"
+output_all="$(cd "${tmpdir}" && bash "${SANDBOX}" init 2>&1)"
+config_content="$(cat "${tmpdir}/.sandbox/config.yaml")"
+assert_contains "${config_content}" "agent: claude-code" "generated config has agent: claude-code"
+assert_contains "${config_content}" "nodejs:" "generated config has nodejs SDK"
+assert_contains "${config_content}" "build-essential" "generated config has build-essential package"
+assert_contains "${config_content}" "curl" "generated config has curl package"
+assert_contains "${config_content}" "wget" "generated config has wget package"
+assert_contains "${config_content}" "git" "generated config has git package"
+assert_contains "${config_content}" "jq" "generated config has jq package"
+rm -rf "${tmpdir}"
 
 # ============================================================================
 # Summary

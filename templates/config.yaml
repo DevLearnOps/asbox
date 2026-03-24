@@ -1,1 +1,37 @@
-# Placeholder — implemented in a later story
+# Sandbox Configuration
+# See: https://github.com/anthropics/sandbox for full documentation
+
+# AI agent to run inside the sandbox
+# Options: claude-code, gemini-cli
+agent: claude-code
+
+# SDK versions to install (comment out to skip)
+sdks:
+  nodejs: "22"
+  # python: "3.12"
+  # go: "1.22"
+
+# Additional system packages to install
+packages:
+  - build-essential
+  - curl
+  - wget
+  - git
+  - jq
+
+# Host directories to mount into the sandbox
+# mounts:
+#   - source: "."
+#     target: "/workspace"
+
+# Secret names resolved from host environment variables at runtime
+# secrets:
+#   - ANTHROPIC_API_KEY
+
+# Non-secret environment variables
+# env:
+#   NODE_ENV: development
+
+# MCP servers to pre-install
+# mcp:
+#   - playwright
