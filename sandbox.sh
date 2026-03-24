@@ -159,8 +159,12 @@ parse_config() {
       CFG_ENV_KEYS+=("${line}")
     done < <(yq eval '.env | to_entries | .[].key' "${CONFIG_PATH}")
     while IFS= read -r line; do
+      if [[ "${line}" == "null" ]]; then line=""; fi
       CFG_ENV_VALUES+=("${line}")
     done < <(yq eval '.env | to_entries | .[].value' "${CONFIG_PATH}")
+    if [[ ${#CFG_ENV_KEYS[@]} -ne ${#CFG_ENV_VALUES[@]} ]]; then
+      die "env keys/values mismatch (multiline values not supported)" 1
+    fi
   fi
 
   # Extract mcp (optional array)
@@ -386,6 +390,15 @@ cmd_run() {
   local secret_name
   for secret_name in "${CFG_SECRETS[@]}"; do
     run_flags+=("-e" "${secret_name}")
+  done
+
+  # Inject non-secret env vars as KEY=VALUE
+  local j
+  for j in "${!CFG_ENV_KEYS[@]}"; do
+    if [[ ! "${CFG_ENV_KEYS[$j]}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+      die "invalid env var name: ${CFG_ENV_KEYS[$j]}" 4
+    fi
+    run_flags+=("-e" "${CFG_ENV_KEYS[$j]}=${CFG_ENV_VALUES[$j]}")
   done
 
   # Resolve mount paths relative to config file directory

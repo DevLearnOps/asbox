@@ -1722,6 +1722,305 @@ assert_not_contains "${docker_build_line}" "RUNTIME_SECRET" "secret not passed d
 rm -rf "${tmpdir}"
 
 # ============================================================================
+# AC: non-secret env var injection — -e KEY=VALUE flags in docker run (AC 1)
+# ============================================================================
+
+echo "# AC: non-secret env var injection — -e KEY=VALUE flags in docker run"
+
+# Test: single env var produces -e KEY=VALUE in docker run args
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+env:
+  NODE_ENV: development
+YAML
+set +e
+output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "single env var injection exits code 0"
+docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
+assert_contains "${docker_run_line}" "-e NODE_ENV=development" "single env var produces -e KEY=VALUE in docker run"
+rm -rf "${tmpdir}"
+
+# Test: multiple env vars produce multiple -e KEY=VALUE flags
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+env:
+  NODE_ENV: development
+  DEBUG: "true"
+YAML
+set +e
+output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "multiple env var injection exits code 0"
+docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
+assert_contains "${docker_run_line}" "-e NODE_ENV=development" "multiple env vars: first -e KEY=VALUE flag present"
+assert_contains "${docker_run_line}" "-e DEBUG=true" "multiple env vars: second -e KEY=VALUE flag present"
+rm -rf "${tmpdir}"
+
+# Test: no env vars produces no extra -e flags (beyond SANDBOX_AGENT and secrets)
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+YAML
+set +e
+output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "no env vars: run exits code 0"
+docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
+# Count -e occurrences: should only have SANDBOX_AGENT
+e_count="$(echo "${docker_run_line}" | grep -o ' -e ' | wc -l | tr -d ' ')"
+if [[ "${e_count}" -eq 1 ]]; then
+  pass "no env vars: only SANDBOX_AGENT -e flag present (count: ${e_count})"
+else
+  fail "no env vars: only SANDBOX_AGENT -e flag present" "expected 1, got ${e_count}"
+fi
+rm -rf "${tmpdir}"
+
+# Test: env var with spaces in value is passed correctly
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<YAML
+agent: claude-code
+env:
+  MY_MESSAGE: hello world
+YAML
+set +e
+output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "env var with spaces exits code 0"
+docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
+assert_contains "${docker_run_line}" "-e MY_MESSAGE=hello world" "env var with spaces in value is passed correctly"
+rm -rf "${tmpdir}"
+
+# Test: env vars appear in mock docker log alongside secret and mount flags
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin" "${tmpdir}/project"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<YAML
+agent: claude-code
+secrets:
+  - MY_SECRET
+env:
+  APP_ENV: staging
+mounts:
+  - source: ./project
+    target: /workspace
+YAML
+set +e
+output_all="$(MY_SECRET=secret123 PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "env vars alongside secrets and mounts exits code 0"
+docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
+assert_contains "${docker_run_line}" "-e SANDBOX_AGENT=claude-code" "SANDBOX_AGENT present alongside env vars"
+assert_contains "${docker_run_line}" "-e MY_SECRET" "secret flag present alongside env vars"
+assert_contains "${docker_run_line}" "-e APP_ENV=staging" "env var flag present alongside secrets"
+assert_contains "${docker_run_line}" "-v " "mount flag present alongside env vars"
+rm -rf "${tmpdir}"
+
+# ============================================================================
+# Integration: complete cmd_run() flag assembly (AC 1, 3)
+# ============================================================================
+
+echo "# Integration: complete cmd_run() flag assembly"
+
+# Test: config with mounts + secrets + env vars produces all flags in correct order
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin" "${tmpdir}/src"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<YAML
+agent: claude-code
+secrets:
+  - API_KEY
+  - DB_PASSWORD
+env:
+  NODE_ENV: production
+  LOG_LEVEL: debug
+mounts:
+  - source: ./src
+    target: /workspace
+YAML
+set +e
+output_all="$(API_KEY=key123 DB_PASSWORD=pass456 PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "integration: mounts + secrets + env vars exits code 0"
+docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
+assert_contains "${docker_run_line}" "-it" "integration: -it flag present"
+assert_contains "${docker_run_line}" "--rm" "integration: --rm flag present"
+assert_contains "${docker_run_line}" "-e SANDBOX_AGENT=claude-code" "integration: SANDBOX_AGENT present"
+assert_contains "${docker_run_line}" "-e API_KEY" "integration: first secret present"
+assert_contains "${docker_run_line}" "-e DB_PASSWORD" "integration: second secret present"
+assert_contains "${docker_run_line}" "-e NODE_ENV=production" "integration: first env var present"
+assert_contains "${docker_run_line}" "-e LOG_LEVEL=debug" "integration: second env var present"
+resolved_src="$(cd "${tmpdir}/src" && pwd)"
+assert_contains "${docker_run_line}" "-v ${resolved_src}:/workspace" "integration: mount flag with resolved path"
+assert_contains "${docker_run_line}" "-w /workspace" "integration: working directory flag present"
+rm -rf "${tmpdir}"
+
+# Test: BMAD-style project directory mounted at /workspace shows correct -v and -w flags
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin" "${tmpdir}/my-project/_bmad-output" "${tmpdir}/my-project/docs"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<YAML
+agent: claude-code
+env:
+  BMAD_PROJECT: my-project
+mounts:
+  - source: ./my-project
+    target: /workspace
+YAML
+set +e
+output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "BMAD project mount exits code 0"
+docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
+resolved_project="$(cd "${tmpdir}/my-project" && pwd)"
+assert_contains "${docker_run_line}" "-v ${resolved_project}:/workspace" "BMAD project: correct -v mount flag"
+assert_contains "${docker_run_line}" "-w /workspace" "BMAD project: correct -w working directory"
+assert_contains "${docker_run_line}" "-e BMAD_PROJECT=my-project" "BMAD project: env var present"
+rm -rf "${tmpdir}"
+
+# Test: env vars coexist with secrets without conflicts
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<YAML
+agent: claude-code
+secrets:
+  - SECRET_TOKEN
+env:
+  PUBLIC_URL: https://example.com
+  APP_NAME: test-app
+YAML
+set +e
+output_all="$(SECRET_TOKEN=tok123 PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "env vars coexist with secrets exits code 0"
+docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
+# Verify secret uses -e KEY (no value) and env vars use -e KEY=VALUE
+assert_contains "${docker_run_line}" "-e SECRET_TOKEN" "coexist: secret flag present"
+assert_not_contains "${docker_run_line}" "-e SECRET_TOKEN=" "coexist: secret does NOT have value in flag"
+assert_contains "${docker_run_line}" "-e PUBLIC_URL=https://example.com" "coexist: first env var with value"
+assert_contains "${docker_run_line}" "-e APP_NAME=test-app" "coexist: second env var with value"
+rm -rf "${tmpdir}"
+
+# ============================================================================
+# Review fixes: env var validation and edge cases
+# ============================================================================
+
+echo "# Review fixes: env var validation and edge cases"
+
+# Test: invalid env var name is rejected with exit code 4
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+env:
+  INVALID-KEY: value
+YAML
+set +e
+output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 4 "${exit_code}" "invalid env var name exits code 4"
+assert_contains "${output_all}" "invalid env var name" "invalid env var name error message shown"
+rm -rf "${tmpdir}"
+
+# Test: env var name with equals sign is rejected
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+env:
+  FOO=BAR: value
+YAML
+set +e
+output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 4 "${exit_code}" "env var name with equals rejected with exit code 4"
+rm -rf "${tmpdir}"
+
+# Test: valid env var names with underscores and numbers pass validation
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+env:
+  _PRIVATE: secret
+  NODE_ENV_2: test
+YAML
+set +e
+output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "valid env var names with underscores and numbers pass"
+docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
+assert_contains "${docker_run_line}" "-e _PRIVATE=secret" "underscore-prefixed env var passes validation"
+assert_contains "${docker_run_line}" "-e NODE_ENV_2=test" "alphanumeric env var passes validation"
+rm -rf "${tmpdir}"
+
+# Test: YAML null value (env: { FOO: }) produces empty string, not literal "null"
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+env:
+  FOO:
+YAML
+set +e
+output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "null env value exits code 0"
+docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
+assert_contains "${docker_run_line}" "-e FOO=" "null env value produces empty value, not literal null"
+assert_not_contains "${docker_run_line}" "-e FOO=null" "null env value is not literal string null"
+rm -rf "${tmpdir}"
+
+# Test: empty env map (env: {}) produces no extra -e flags
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+env: {}
+YAML
+set +e
+output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "empty env map exits code 0"
+docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
+e_count="$(echo "${docker_run_line}" | grep -o ' -e ' | wc -l | tr -d ' ')"
+if [[ "${e_count}" -eq 1 ]]; then
+  pass "empty env map: only SANDBOX_AGENT -e flag present (count: ${e_count})"
+else
+  fail "empty env map: only SANDBOX_AGENT -e flag present" "expected 1, got ${e_count}"
+fi
+rm -rf "${tmpdir}"
+
+# ============================================================================
 # AC: entrypoint.sh — agent mapping and error handling
 # ============================================================================
 

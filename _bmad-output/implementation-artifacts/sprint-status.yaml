@@ -59,7 +59,7 @@ development_status:
   epic-2: in-progress
   2-1-host-directory-mounts: done
   2-2-secret-injection-and-validation: done
-  2-3-agent-runtime-with-project-files-and-bmad-support: backlog
+  2-3-agent-runtime-with-project-files-and-bmad-support: done
   2-4-git-and-cli-toolchain: backlog
   epic-2-retrospective: optional
 
