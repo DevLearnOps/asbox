@@ -354,7 +354,11 @@ cmd_build() {
 
 cmd_run() {
   parse_config
-  info "not yet implemented"
+  cmd_build
+  info "starting sandbox: ${IMAGE_TAG}"
+  docker run -it --rm \
+    -e "SANDBOX_AGENT=${CFG_AGENT}" \
+    "${IMAGE_TAG}"
 }
 
 # ============================================================================

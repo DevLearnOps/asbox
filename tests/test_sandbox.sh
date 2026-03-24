@@ -226,13 +226,13 @@ fi
 
 echo "# Additional: command stubs and error handling"
 
-# run command still has stub
+# run command requires config (no stub anymore)
 set +e
 output_all="$(bash "${SANDBOX}" run 2>&1)"
 exit_code=$?
 set -e
-assert_exit_code 0 "${exit_code}" "'run' exits with code 0"
-assert_contains "${output_all}" "not yet implemented" "'run' prints not yet implemented"
+assert_exit_code 1 "${exit_code}" "'run' without config exits with code 1"
+assert_contains "${output_all}" "config not found" "'run' without config prints config error"
 
 # Unknown command
 set +e
@@ -622,7 +622,7 @@ cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: gemini-cli
 YAML
 set +e
-output_all="$(bash "${SANDBOX}" -f "${tmpdir}/config.yaml" run 2>&1)"
+output_all="$(PATH="${BUILD_PATH}" bash "${SANDBOX}" -f "${tmpdir}/config.yaml" run 2>&1)"
 exit_code=$?
 set -e
 assert_exit_code 0 "${exit_code}" "parse_config works with -f before command (run)"
@@ -647,14 +647,15 @@ assert_exit_code 0 "${exit_code}" "parse_config works with default starter confi
 assert_contains "${output_all}" "image built: sandbox-" "build continues after parsing starter config"
 rm -rf "${tmpdir}"
 
-# Test: run also works with starter config
+# Test: run also works with starter config (parses config and triggers build+run)
 tmpdir="$(mktemp -d)"
 output_all="$(cd "${tmpdir}" && bash "${SANDBOX}" init 2>&1)"
 set +e
-output_all="$(cd "${tmpdir}" && bash "${SANDBOX}" run 2>&1)"
+output_all="$(cd "${tmpdir}" && PATH="${BUILD_PATH}" bash "${SANDBOX}" run 2>&1)"
 exit_code=$?
 set -e
 assert_exit_code 0 "${exit_code}" "parse_config works with starter config via run command"
+assert_contains "${output_all}" "starting sandbox:" "run prints starting sandbox message"
 rm -rf "${tmpdir}"
 
 # ============================================================================
@@ -1182,6 +1183,239 @@ assert_contains "${docker_build_line}" ".sandbox-dockerfile" "docker build refer
 rm -rf "${tmpdir}"
 
 # BUILD_MOCK_DIR cleanup is handled by the EXIT trap
+
+# ============================================================================
+# AC: cmd_run — calls docker run with correct flags
+# ============================================================================
+
+echo "# AC: cmd_run — calls docker run with correct flags"
+
+# Test: sandbox run calls docker run with -it and --rm flags
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+YAML
+set +e
+output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "sandbox run exits code 0"
+assert_contains "${output_all}" "starting sandbox:" "sandbox run prints starting message"
+
+docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
+assert_contains "${docker_run_line}" "-it" "docker run includes -it flag"
+assert_contains "${docker_run_line}" "--rm" "docker run includes --rm flag"
+rm -rf "${tmpdir}"
+
+# Test: sandbox run passes SANDBOX_AGENT env var to container
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+YAML
+set +e
+output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+set -e
+docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
+assert_contains "${docker_run_line}" "SANDBOX_AGENT=claude-code" "docker run passes SANDBOX_AGENT=claude-code"
+rm -rf "${tmpdir}"
+
+# Test: sandbox run passes SANDBOX_AGENT=gemini-cli for gemini config
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: gemini-cli
+YAML
+set +e
+output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+set -e
+docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
+assert_contains "${docker_run_line}" "SANDBOX_AGENT=gemini-cli" "docker run passes SANDBOX_AGENT=gemini-cli"
+rm -rf "${tmpdir}"
+
+# Test: sandbox run with no existing image triggers build first, then run
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin"
+setup_build_mock "${tmpdir}/mockbin" 1
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+YAML
+set +e
+output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "sandbox run with no image exits code 0"
+assert_contains "${output_all}" "building image:" "sandbox run triggers build when no image"
+assert_contains "${output_all}" "starting sandbox:" "sandbox run starts after build"
+
+# Verify both docker build and docker run were called
+if grep -q "docker build" "${tmpdir}/mockbin/docker.log" 2>/dev/null; then
+  pass "sandbox run triggers docker build when image missing"
+else
+  fail "sandbox run triggers docker build when image missing"
+fi
+if grep -q "docker run" "${tmpdir}/mockbin/docker.log" 2>/dev/null; then
+  pass "sandbox run calls docker run after build"
+else
+  fail "sandbox run calls docker run after build"
+fi
+rm -rf "${tmpdir}"
+
+# Test: sandbox run with existing image skips build, goes straight to run
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+YAML
+set +e
+output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "sandbox run with existing image exits code 0"
+assert_contains "${output_all}" "image up to date:" "sandbox run skips build when image exists"
+assert_not_contains "${output_all}" "building image:" "sandbox run does NOT build when image exists"
+
+# Verify docker build was NOT called but docker run WAS called
+if grep -q "docker build" "${tmpdir}/mockbin/docker.log" 2>/dev/null; then
+  fail "docker build is NOT called when image exists (run)"
+else
+  pass "docker build is NOT called when image exists (run)"
+fi
+if grep -q "docker run" "${tmpdir}/mockbin/docker.log" 2>/dev/null; then
+  pass "docker run IS called when image exists"
+else
+  fail "docker run IS called when image exists"
+fi
+rm -rf "${tmpdir}"
+
+# Test: sandbox run -f custom/config.yaml uses custom config path
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin" "${tmpdir}/custom"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/custom/config.yaml" <<'YAML'
+agent: gemini-cli
+YAML
+set +e
+output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/custom/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "sandbox run -f custom/config.yaml exits code 0"
+docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
+assert_contains "${docker_run_line}" "SANDBOX_AGENT=gemini-cli" "sandbox run -f uses custom config for agent"
+rm -rf "${tmpdir}"
+
+# Test: docker run receives correct IMAGE_TAG
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+YAML
+set +e
+output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+set -e
+docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
+assert_contains "${docker_run_line}" "sandbox-" "docker run receives image tag with sandbox- prefix"
+# Verify the tag has the hash part (12 chars after colon)
+if echo "${docker_run_line}" | grep -qE 'sandbox-[a-z0-9._-]+:[a-f0-9]{12}'; then
+  pass "docker run receives IMAGE_TAG in correct format"
+else
+  fail "docker run receives IMAGE_TAG in correct format" "line: ${docker_run_line}"
+fi
+rm -rf "${tmpdir}"
+
+# ============================================================================
+# AC: entrypoint.sh — agent mapping and error handling
+# ============================================================================
+
+echo "# AC: entrypoint.sh — agent mapping and error handling"
+
+ENTRYPOINT="${PROJECT_ROOT}/scripts/entrypoint.sh"
+
+# Test: SANDBOX_AGENT=claude-code execs claude --dangerously-skip-permissions
+tmpdir="$(mktemp -d)"
+mock_agent_dir="$(mktemp -d)"
+cat > "${mock_agent_dir}/claude" <<MOCK
+#!/usr/bin/env bash
+echo "claude \$*" > "${tmpdir}/agent.log"
+MOCK
+chmod +x "${mock_agent_dir}/claude"
+
+set +e
+SANDBOX_AGENT=claude-code PATH="${mock_agent_dir}:${SYSTEM_PATH}" bash "${ENTRYPOINT}" 2>&1
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "entrypoint with claude-code exits code 0"
+if [[ -f "${tmpdir}/agent.log" ]]; then
+  agent_output="$(cat "${tmpdir}/agent.log")"
+  assert_contains "${agent_output}" "--dangerously-skip-permissions" "entrypoint execs claude with --dangerously-skip-permissions"
+else
+  fail "entrypoint execs claude with --dangerously-skip-permissions" "agent.log not created"
+fi
+rm -rf "${tmpdir}" "${mock_agent_dir}"
+
+# Test: SANDBOX_AGENT=gemini-cli execs gemini
+tmpdir="$(mktemp -d)"
+mock_agent_dir="$(mktemp -d)"
+cat > "${mock_agent_dir}/gemini" <<MOCK
+#!/usr/bin/env bash
+echo "gemini \$*" > "${tmpdir}/agent.log"
+MOCK
+chmod +x "${mock_agent_dir}/gemini"
+
+set +e
+SANDBOX_AGENT=gemini-cli PATH="${mock_agent_dir}:${SYSTEM_PATH}" bash "${ENTRYPOINT}" 2>&1
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "entrypoint with gemini-cli exits code 0"
+if [[ -f "${tmpdir}/agent.log" ]]; then
+  agent_output="$(cat "${tmpdir}/agent.log")"
+  assert_contains "${agent_output}" "gemini" "entrypoint execs gemini"
+else
+  fail "entrypoint execs gemini" "agent.log not created"
+fi
+rm -rf "${tmpdir}" "${mock_agent_dir}"
+
+# Test: unknown SANDBOX_AGENT value exits with error
+set +e
+output_all="$(SANDBOX_AGENT=unknown-agent PATH="${SYSTEM_PATH}" bash "${ENTRYPOINT}" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 1 "${exit_code}" "entrypoint with unknown agent exits code 1"
+assert_contains "${output_all}" "error: unknown agent: unknown-agent" "entrypoint prints unknown agent error"
+
+# Test: unset SANDBOX_AGENT exits with error
+set +e
+output_all="$(unset SANDBOX_AGENT && PATH="${SYSTEM_PATH}" bash "${ENTRYPOINT}" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 1 "${exit_code}" "entrypoint with unset SANDBOX_AGENT exits code 1"
+assert_contains "${output_all}" "error: SANDBOX_AGENT not set" "entrypoint prints SANDBOX_AGENT not set error"
+
+# Test: SANDBOX_AGENT=claude-code with claude not in PATH exits with error
+empty_bin_dir="$(mktemp -d)"
+set +e
+output_all="$(SANDBOX_AGENT=claude-code PATH="${empty_bin_dir}:${SYSTEM_PATH}" bash "${ENTRYPOINT}" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 1 "${exit_code}" "entrypoint with claude-code but no claude binary exits code 1"
+assert_contains "${output_all}" "error: claude not found in PATH" "entrypoint prints claude not found error"
+rm -rf "${empty_bin_dir}"
+
+# Test: SANDBOX_AGENT=gemini-cli with gemini not in PATH exits with error
+empty_bin_dir="$(mktemp -d)"
+set +e
+output_all="$(SANDBOX_AGENT=gemini-cli PATH="${empty_bin_dir}:${SYSTEM_PATH}" bash "${ENTRYPOINT}" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 1 "${exit_code}" "entrypoint with gemini-cli but no gemini binary exits code 1"
+assert_contains "${output_all}" "error: gemini not found in PATH" "entrypoint prints gemini not found error"
+rm -rf "${empty_bin_dir}"
 
 # ============================================================================
 # Summary
