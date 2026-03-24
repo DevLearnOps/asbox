@@ -665,6 +665,259 @@ assert_exit_code 0 "${exit_code}" "parse_config handles full config with all sec
 rm -rf "${tmpdir}"
 
 # ============================================================================
+# AC: process_template — Node.js + Python enabled, Go stripped
+# ============================================================================
+
+echo "# AC: process_template — Node.js + Python enabled, Go stripped"
+
+rm -f "${PROJECT_ROOT}/.sandbox-dockerfile"
+tmpdir="$(mktemp -d)"
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+sdks:
+  nodejs: "22"
+  python: "3.12"
+packages:
+  - build-essential
+  - curl
+YAML
+set +e
+output_all="$(bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "template with Node.js+Python exits code 0"
+
+dockerfile_content="$(cat "${PROJECT_ROOT}/.sandbox-dockerfile")"
+assert_contains "${dockerfile_content}" "setup_22.x" "resolved Dockerfile contains Node.js 22 install"
+assert_contains "${dockerfile_content}" "python3.12" "resolved Dockerfile contains Python 3.12 install"
+assert_not_contains "${dockerfile_content}" "IF_NODE" "resolved Dockerfile has no IF_NODE tags"
+assert_not_contains "${dockerfile_content}" "IF_PYTHON" "resolved Dockerfile has no IF_PYTHON tags"
+assert_not_contains "${dockerfile_content}" "IF_GO" "resolved Dockerfile has no IF_GO block"
+assert_not_contains "${dockerfile_content}" "go.dev" "resolved Dockerfile has no Go install"
+rm -rf "${tmpdir}"
+
+# ============================================================================
+# AC: process_template — no SDKs strips all conditional blocks
+# ============================================================================
+
+echo "# AC: process_template — no SDKs strips all conditional blocks"
+
+rm -f "${PROJECT_ROOT}/.sandbox-dockerfile"
+tmpdir="$(mktemp -d)"
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+YAML
+set +e
+output_all="$(bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "template with no SDKs exits code 0"
+
+dockerfile_content="$(cat "${PROJECT_ROOT}/.sandbox-dockerfile")"
+assert_not_contains "${dockerfile_content}" "nodejs" "no SDKs: no Node.js install"
+assert_not_contains "${dockerfile_content}" "python" "no SDKs: no Python install"
+assert_not_contains "${dockerfile_content}" "go.dev" "no SDKs: no Go install"
+assert_not_contains "${dockerfile_content}" "IF_" "no SDKs: no conditional tags remain"
+assert_contains "${dockerfile_content}" "tini" "no SDKs: base tooling (tini) remains"
+assert_contains "${dockerfile_content}" "ENTRYPOINT" "no SDKs: ENTRYPOINT remains"
+rm -rf "${tmpdir}"
+
+# ============================================================================
+# AC: process_template — all three SDKs enabled
+# ============================================================================
+
+echo "# AC: process_template — all three SDKs enabled"
+
+rm -f "${PROJECT_ROOT}/.sandbox-dockerfile"
+tmpdir="$(mktemp -d)"
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+sdks:
+  nodejs: "20"
+  python: "3.11"
+  go: "1.22"
+packages:
+  - git
+YAML
+set +e
+output_all="$(bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "template with all SDKs exits code 0"
+
+dockerfile_content="$(cat "${PROJECT_ROOT}/.sandbox-dockerfile")"
+assert_contains "${dockerfile_content}" "setup_20.x" "all SDKs: Node.js 20 install present"
+assert_contains "${dockerfile_content}" "python3.11" "all SDKs: Python 3.11 install present"
+assert_contains "${dockerfile_content}" "go1.22.linux-amd64" "all SDKs: Go 1.22 install present"
+assert_not_contains "${dockerfile_content}" "IF_" "all SDKs: no conditional tags remain"
+rm -rf "${tmpdir}"
+
+# ============================================================================
+# AC: process_template — packages substitution
+# ============================================================================
+
+echo "# AC: process_template — packages substitution"
+
+rm -f "${PROJECT_ROOT}/.sandbox-dockerfile"
+tmpdir="$(mktemp -d)"
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+packages:
+  - build-essential
+  - curl
+  - wget
+YAML
+set +e
+output_all="$(bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "packages substitution exits code 0"
+
+dockerfile_content="$(cat "${PROJECT_ROOT}/.sandbox-dockerfile")"
+assert_contains "${dockerfile_content}" "build-essential curl wget" "packages list substituted into apt-get install"
+rm -rf "${tmpdir}"
+
+# ============================================================================
+# AC: process_template — empty packages produces valid Dockerfile
+# ============================================================================
+
+echo "# AC: process_template — empty packages"
+
+rm -f "${PROJECT_ROOT}/.sandbox-dockerfile"
+tmpdir="$(mktemp -d)"
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+YAML
+set +e
+output_all="$(bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "empty packages exits code 0"
+
+dockerfile_content="$(cat "${PROJECT_ROOT}/.sandbox-dockerfile")"
+assert_not_contains "${dockerfile_content}" "{{PACKAGES}}" "empty packages: no PACKAGES placeholder remains"
+assert_not_contains "${dockerfile_content}" "{{" "empty packages: no unresolved placeholders"
+rm -rf "${tmpdir}"
+
+# ============================================================================
+# AC: process_template — mismatched tags error
+# ============================================================================
+
+echo "# AC: process_template — mismatched tags error"
+
+tmpdir="$(mktemp -d)"
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+YAML
+# Create a broken template with unmatched opening tag
+orig_template="${PROJECT_ROOT}/Dockerfile.template"
+cp "${orig_template}" "${orig_template}.bak"
+restore_template() { cp "${orig_template}.bak" "${orig_template}"; rm -f "${orig_template}.bak"; }
+trap restore_template EXIT
+cat > "${orig_template}" <<'TMPL'
+FROM {{BASE_IMAGE}}
+# {{IF_NODE}}
+RUN echo "node"
+TMPL
+set +e
+output_all="$(bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+restore_template
+trap - EXIT
+
+assert_exit_code 1 "${exit_code}" "mismatched tag exits code 1"
+assert_contains "${output_all}" "unmatched" "mismatched tag prints unmatched error"
+assert_contains "${output_all}" "IF_NODE" "mismatched tag names the unmatched tag"
+rm -rf "${tmpdir}"
+
+# ============================================================================
+# AC: process_template — unresolved placeholder error
+# ============================================================================
+
+echo "# AC: process_template — unresolved placeholder error"
+
+tmpdir="$(mktemp -d)"
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+YAML
+# Create a template with an unknown placeholder
+orig_template="${PROJECT_ROOT}/Dockerfile.template"
+cp "${orig_template}" "${orig_template}.bak"
+restore_template() { cp "${orig_template}.bak" "${orig_template}"; rm -f "${orig_template}.bak"; }
+trap restore_template EXIT
+cat > "${orig_template}" <<'TMPL'
+FROM {{BASE_IMAGE}}
+RUN echo {{UNKNOWN_THING}}
+TMPL
+set +e
+output_all="$(bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+restore_template
+trap - EXIT
+
+assert_exit_code 1 "${exit_code}" "unresolved placeholder exits code 1"
+assert_contains "${output_all}" "unresolved placeholder" "unresolved placeholder prints error message"
+assert_contains "${output_all}" "UNKNOWN_THING" "unresolved placeholder names the placeholder"
+rm -rf "${tmpdir}"
+
+# ============================================================================
+# AC: process_template — resolved Dockerfile contains no {{ markers
+# ============================================================================
+
+echo "# AC: process_template — no {{ markers in resolved Dockerfile"
+
+rm -f "${PROJECT_ROOT}/.sandbox-dockerfile"
+tmpdir="$(mktemp -d)"
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+sdks:
+  nodejs: "22"
+  python: "3.12"
+  go: "1.22"
+packages:
+  - build-essential
+YAML
+set +e
+output_all="$(bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "full config for marker check exits code 0"
+
+dockerfile_content="$(cat "${PROJECT_ROOT}/.sandbox-dockerfile")"
+if echo "${dockerfile_content}" | grep -q '{{'; then
+  fail "resolved Dockerfile contains no {{ markers" "found {{ in resolved Dockerfile"
+else
+  pass "resolved Dockerfile contains no {{ markers"
+fi
+rm -rf "${tmpdir}"
+
+# ============================================================================
+# AC: process_template — end-to-end via sandbox build -f
+# ============================================================================
+
+echo "# AC: process_template — end-to-end via sandbox build -f"
+
+rm -f "${PROJECT_ROOT}/.sandbox-dockerfile"
+tmpdir="$(mktemp -d)"
+# Use sandbox init to get a starter config, then build with it
+output_all="$(cd "${tmpdir}" && bash "${SANDBOX}" init 2>&1)"
+set +e
+output_all="$(cd "${tmpdir}" && bash "${SANDBOX}" build 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "end-to-end build with starter config exits code 0"
+assert_contains "${output_all}" "generated Dockerfile" "end-to-end build prints generated Dockerfile message"
+assert_contains "${output_all}" "not yet implemented" "end-to-end build still prints not yet implemented (docker build is story 1-5)"
+if [[ -f "${PROJECT_ROOT}/.sandbox-dockerfile" ]]; then
+  pass "end-to-end build creates .sandbox-dockerfile"
+else
+  fail "end-to-end build creates .sandbox-dockerfile"
+fi
+rm -rf "${tmpdir}"
+
+# ============================================================================
 # Summary
 # ============================================================================
 

@@ -1,1 +1,48 @@
-# Placeholder — implemented in a later story
+FROM {{BASE_IMAGE}}
+
+LABEL maintainer="sandbox"
+
+# Install tini for proper signal forwarding
+RUN apt-get update && apt-get install -y --no-install-recommends tini \
+    && rm -rf /var/lib/apt/lists/*
+
+# Common CLI tools (always installed)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    wget \
+    dnsutils \
+    ca-certificates \
+    gnupg \
+    && rm -rf /var/lib/apt/lists/*
+
+# System packages from config
+RUN apt-get update && apt-get install -y --no-install-recommends {{PACKAGES}} && rm -rf /var/lib/apt/lists/*
+
+# {{IF_NODE}}
+RUN curl -fsSL https://deb.nodesource.com/setup_{{NODE_VERSION}}.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+# {{/IF_NODE}}
+
+# {{IF_PYTHON}}
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python{{PYTHON_VERSION}} python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+# {{/IF_PYTHON}}
+
+# {{IF_GO}}
+RUN curl -fsSL https://go.dev/dl/go{{GO_VERSION}}.linux-amd64.tar.gz | tar -C /usr/local -xzf -
+ENV PATH="/usr/local/go/bin:${PATH}"
+# {{/IF_GO}}
+
+# Copy isolation scripts
+COPY scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY scripts/git-wrapper.sh /usr/local/bin/git
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/git
+
+# Non-root user for rootless operation
+RUN useradd -m -s /bin/bash sandbox
+USER sandbox
+
+ENTRYPOINT ["tini", "--"]
+CMD ["/usr/local/bin/entrypoint.sh"]

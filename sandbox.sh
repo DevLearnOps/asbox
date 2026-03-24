@@ -80,6 +80,7 @@ CFG_MOUNT_SOURCES=()
 CFG_MOUNT_TARGETS=()
 CFG_ENV_KEYS=()
 CFG_ENV_VALUES=()
+RESOLVED_DOCKERFILE=""
 
 # ============================================================================
 # Config parsing functions
@@ -172,11 +173,117 @@ parse_config() {
 }
 
 # ============================================================================
-# Build functions (stub)
+# Build functions
 # ============================================================================
+
+# Escape a string for use as a sed replacement (handles &, \, |)
+sed_escape_replacement() {
+  printf '%s' "$1" | sed -e 's|[\\&|]|\\&|g'
+}
+
+# Ubuntu 24.04 LTS pinned to digest for reproducible builds
+readonly BASE_IMAGE="ubuntu:24.04@sha256:186072bba1b2f436cbb91ef2567abca677337cfc786c86e107d25b7072feef0c"
+
+process_template() {
+  local template_file="${SCRIPT_DIR}/Dockerfile.template"
+  if [[ ! -f "${template_file}" ]]; then
+    die "template not found: ${template_file}" 1
+  fi
+
+  local template
+  template="$(cat "${template_file}")"
+
+  # Step 1: Extract all conditional tag names and validate matching pairs
+  local open_tags close_tags tag
+  open_tags="$(echo "${template}" | grep -oE '\{\{IF_[A-Z_]+\}\}' | sed 's/[{}]//g' | sort -u || true)"
+  close_tags="$(echo "${template}" | grep -oE '\{\{/IF_[A-Z_]+\}\}' | sed 's|[{}/]||g' | sort -u || true)"
+
+  # Check every opening tag has a closing tag
+  for tag in ${open_tags}; do
+    if ! echo "${close_tags}" | grep -qx "${tag}"; then
+      die "unmatched opening tag: {{${tag}}}" 1
+    fi
+  done
+
+  # Check every closing tag has an opening tag
+  for tag in ${close_tags}; do
+    if ! echo "${open_tags}" | grep -qx "${tag}"; then
+      die "unmatched closing tag: {{/${tag}}}" 1
+    fi
+  done
+
+  # Step 2: Process conditional blocks
+  # IF_NODE
+  if [[ -n "${CFG_SDK_NODEJS}" ]]; then
+    # Keep content, remove tag lines
+    template="$(echo "${template}" | sed '/^# {{IF_NODE}}$/d; /^# {{\/IF_NODE}}$/d')"
+  else
+    # Strip entire block including tag lines
+    template="$(echo "${template}" | sed '/^# {{IF_NODE}}$/,/^# {{\/IF_NODE}}$/d')"
+  fi
+
+  # IF_PYTHON
+  if [[ -n "${CFG_SDK_PYTHON}" ]]; then
+    template="$(echo "${template}" | sed '/^# {{IF_PYTHON}}$/d; /^# {{\/IF_PYTHON}}$/d')"
+  else
+    template="$(echo "${template}" | sed '/^# {{IF_PYTHON}}$/,/^# {{\/IF_PYTHON}}$/d')"
+  fi
+
+  # IF_GO
+  if [[ -n "${CFG_SDK_GO}" ]]; then
+    template="$(echo "${template}" | sed '/^# {{IF_GO}}$/d; /^# {{\/IF_GO}}$/d')"
+  else
+    template="$(echo "${template}" | sed '/^# {{IF_GO}}$/,/^# {{\/IF_GO}}$/d')"
+  fi
+
+  # Step 3: Substitute value placeholders
+  local safe_val
+  safe_val="$(sed_escape_replacement "${BASE_IMAGE}")"
+  template="$(echo "${template}" | sed "s|{{BASE_IMAGE}}|${safe_val}|g")"
+
+  if [[ -n "${CFG_SDK_NODEJS}" ]]; then
+    safe_val="$(sed_escape_replacement "${CFG_SDK_NODEJS}")"
+    template="$(echo "${template}" | sed "s|{{NODE_VERSION}}|${safe_val}|g")"
+  fi
+
+  if [[ -n "${CFG_SDK_PYTHON}" ]]; then
+    safe_val="$(sed_escape_replacement "${CFG_SDK_PYTHON}")"
+    template="$(echo "${template}" | sed "s|{{PYTHON_VERSION}}|${safe_val}|g")"
+  fi
+
+  if [[ -n "${CFG_SDK_GO}" ]]; then
+    safe_val="$(sed_escape_replacement "${CFG_SDK_GO}")"
+    template="$(echo "${template}" | sed "s|{{GO_VERSION}}|${safe_val}|g")"
+  fi
+
+  # Handle packages: join array with spaces, remove the RUN line if empty
+  local packages_str="${CFG_PACKAGES[*]:-}"
+  if [[ -n "${packages_str}" ]]; then
+    safe_val="$(sed_escape_replacement "${packages_str}")"
+    template="$(echo "${template}" | sed "s|{{PACKAGES}}|${safe_val}|g")"
+  else
+    # Remove the packages RUN block (multi-line with backslash continuation)
+    template="$(echo "${template}" | sed '/{{PACKAGES}}/d')"
+  fi
+
+  # Step 4: Validate no unresolved placeholders remain
+  local unresolved
+  unresolved="$(echo "${template}" | grep -oE '\{\{/?[A-Z_]+\}\}' | head -1 || true)"
+  if [[ -n "${unresolved}" ]]; then
+    die "unresolved placeholder: ${unresolved}" 1
+  fi
+
+  RESOLVED_DOCKERFILE="${template}"
+}
 
 cmd_build() {
   parse_config
+  process_template
+
+  local dockerfile_path
+  dockerfile_path="${SCRIPT_DIR}/.sandbox-dockerfile"
+  echo "${RESOLVED_DOCKERFILE}" > "${dockerfile_path}"
+  info "generated Dockerfile: ${dockerfile_path}"
   info "not yet implemented"
 }
 
