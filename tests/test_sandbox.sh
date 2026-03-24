@@ -2109,6 +2109,155 @@ assert_contains "${output_all}" "error: gemini not found in PATH" "entrypoint pr
 rm -rf "${empty_bin_dir}"
 
 # ============================================================================
+# AC: git-wrapper.sh — transparent passthrough to real git
+# ============================================================================
+
+echo "# AC: git-wrapper.sh — transparent passthrough to real git"
+
+GIT_WRAPPER="${PROJECT_ROOT}/scripts/git-wrapper.sh"
+
+# Test: git-wrapper.sh forwards all arguments to /usr/bin/git
+tmpdir="$(mktemp -d)"
+mock_git="${tmpdir}/git"
+cat > "${mock_git}" <<'MOCK'
+#!/usr/bin/env bash
+echo "ARGS:$*"
+MOCK
+chmod +x "${mock_git}"
+# The wrapper uses exec /usr/bin/git "$@", so we replace /usr/bin/git path in a copy
+wrapper_copy="${tmpdir}/git-wrapper-test.sh"
+sed "s|/usr/bin/git|${mock_git}|g" "${GIT_WRAPPER}" > "${wrapper_copy}"
+chmod +x "${wrapper_copy}"
+
+set +e
+output_all="$(bash "${wrapper_copy}" add -A -- file1.txt file2.txt 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "git wrapper exits 0 when git succeeds"
+assert_contains "${output_all}" "ARGS:add -A -- file1.txt file2.txt" "git wrapper forwards all arguments to real git"
+
+# Test: git-wrapper.sh preserves exit codes from real git
+mock_git_fail="${tmpdir}/git-fail"
+cat > "${mock_git_fail}" <<'MOCK'
+#!/usr/bin/env bash
+exit 128
+MOCK
+chmod +x "${mock_git_fail}"
+wrapper_fail="${tmpdir}/git-wrapper-fail.sh"
+sed "s|/usr/bin/git|${mock_git_fail}|g" "${GIT_WRAPPER}" > "${wrapper_fail}"
+chmod +x "${wrapper_fail}"
+
+set +e
+output_all="$(bash "${wrapper_fail}" status 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 128 "${exit_code}" "git wrapper preserves non-zero exit code from real git"
+
+# Test: git-wrapper.sh passes stdin through (for commit messages)
+mock_git_stdin="${tmpdir}/git-stdin"
+cat > "${mock_git_stdin}" <<'MOCK'
+#!/usr/bin/env bash
+echo "STDIN:$(cat)"
+MOCK
+chmod +x "${mock_git_stdin}"
+wrapper_stdin="${tmpdir}/git-wrapper-stdin.sh"
+sed "s|/usr/bin/git|${mock_git_stdin}|g" "${GIT_WRAPPER}" > "${wrapper_stdin}"
+chmod +x "${wrapper_stdin}"
+
+set +e
+output_all="$(echo "test commit message" | bash "${wrapper_stdin}" commit -F - 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "git wrapper with stdin exits 0"
+assert_contains "${output_all}" "STDIN:test commit message" "git wrapper passes stdin through to real git"
+
+# Test: common git operations all pass through (add, commit, log, diff, branch, checkout, merge, commit --amend)
+mock_git_ops="${tmpdir}/git-ops"
+cat > "${mock_git_ops}" <<'MOCK'
+#!/usr/bin/env bash
+echo "OP:$*"
+MOCK
+chmod +x "${mock_git_ops}"
+wrapper_ops="${tmpdir}/git-wrapper-ops.sh"
+sed "s|/usr/bin/git|${mock_git_ops}|g" "${GIT_WRAPPER}" > "${wrapper_ops}"
+chmod +x "${wrapper_ops}"
+
+for op in add commit log diff branch checkout merge push; do
+  set +e
+  output_all="$(bash "${wrapper_ops}" "${op}" 2>&1)"
+  exit_code=$?
+  set -e
+  assert_exit_code 0 "${exit_code}" "git wrapper passes through '${op}' operation"
+  assert_contains "${output_all}" "OP:${op}" "git wrapper forwards '${op}' to real git"
+done
+
+# Test: git commit --amend passes through
+set +e
+output_all="$(bash "${wrapper_ops}" commit --amend 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "git wrapper passes through 'commit --amend' operation"
+assert_contains "${output_all}" "OP:commit --amend" "git wrapper forwards 'commit --amend' to real git"
+
+rm -rf "${tmpdir}"
+
+# ============================================================================
+# AC: Dockerfile.template includes git, curl, wget, dnsutils in base packages
+# ============================================================================
+
+echo "# AC: Dockerfile.template includes git, curl, wget, dnsutils in base packages"
+
+DOCKERFILE_TEMPLATE="${PROJECT_ROOT}/Dockerfile.template"
+template_content="$(cat "${DOCKERFILE_TEMPLATE}")"
+
+# Extract the "Common CLI tools" apt-get install block to test against
+base_pkg_block="$(sed -n '/^# Common CLI tools/,/rm -rf/p' "${DOCKERFILE_TEMPLATE}")"
+
+# Test: Dockerfile.template base apt-get install includes git
+assert_contains "${base_pkg_block}" "git" "Dockerfile.template base packages include git"
+
+# Test: Dockerfile.template base apt-get install includes curl
+assert_contains "${base_pkg_block}" "curl" "Dockerfile.template base packages include curl"
+
+# Test: Dockerfile.template base apt-get install includes wget
+assert_contains "${base_pkg_block}" "wget" "Dockerfile.template base packages include wget"
+
+# Test: Dockerfile.template base apt-get install includes dnsutils
+assert_contains "${base_pkg_block}" "dnsutils" "Dockerfile.template base packages include dnsutils"
+
+# Test: resolved Dockerfile contains expected base package installation lines
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin"
+setup_build_mock "${tmpdir}/mockbin" 1
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+YAML
+set +e
+output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
+set -e
+# The build process creates a resolved Dockerfile — verify docker build was invoked
+docker_build_line="$(grep "docker build" "${tmpdir}/mockbin/docker.log" || true)"
+assert_contains "${docker_build_line}" "docker build" "docker build command was invoked"
+rm -rf "${tmpdir}"
+
+# Test: no network isolation flags in docker run command (internet unrestricted by default)
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+YAML
+set +e
+output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+set -e
+docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
+assert_contains "${docker_run_line}" "docker run" "docker run command was invoked"
+assert_not_contains "${docker_run_line}" "--network=none" "docker run does not include --network=none flag"
+assert_not_contains "${docker_run_line}" "--network none" "docker run does not include --network none flag"
+assert_not_contains "${docker_run_line}" "--net=none" "docker run does not include --net=none flag"
+rm -rf "${tmpdir}"
+
+# ============================================================================
 # Summary
 # ============================================================================
 
