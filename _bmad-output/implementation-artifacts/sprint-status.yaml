@@ -56,7 +56,7 @@ development_status:
 
   # Epic 2: Project Integration -- Agent Can Work With Project Files and Git
   epic-2: in-progress
-  2-1-host-directory-mounts: review
+  2-1-host-directory-mounts: done
   2-2-secret-injection-and-validation: backlog
   2-3-agent-runtime-with-project-files-and-bmad-support: backlog
   2-4-git-and-cli-toolchain: backlog
