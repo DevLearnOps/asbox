@@ -746,7 +746,8 @@ assert_exit_code 0 "${exit_code}" "template with no SDKs exits code 0"
 
 dockerfile_content="$(cat "${PROJECT_ROOT}/.sandbox-dockerfile")"
 assert_not_contains "${dockerfile_content}" "nodejs" "no SDKs: no Node.js install"
-assert_not_contains "${dockerfile_content}" "python" "no SDKs: no Python install"
+assert_not_contains "${dockerfile_content}" "python3." "no SDKs: no versioned Python SDK install"
+assert_not_contains "${dockerfile_content}" "IF_PYTHON" "no SDKs: no Python SDK conditional block"
 assert_not_contains "${dockerfile_content}" "go.dev" "no SDKs: no Go install"
 assert_not_contains "${dockerfile_content}" "IF_" "no SDKs: no conditional tags remain"
 assert_contains "${dockerfile_content}" "tini" "no SDKs: base tooling (tini) remains"
@@ -780,6 +781,7 @@ dockerfile_content="$(cat "${PROJECT_ROOT}/.sandbox-dockerfile")"
 assert_contains "${dockerfile_content}" "setup_20.x" "all SDKs: Node.js 20 install present"
 assert_contains "${dockerfile_content}" "python3.11" "all SDKs: Python 3.11 install present"
 assert_contains "${dockerfile_content}" "go1.22.linux-amd64" "all SDKs: Go 1.22 install present"
+assert_contains "${dockerfile_content}" "podman-compose" "all SDKs: podman-compose still present alongside Python SDK"
 assert_not_contains "${dockerfile_content}" "IF_" "all SDKs: no conditional tags remain"
 rm -rf "${tmpdir}"
 
@@ -2508,6 +2510,52 @@ fi
 assert_contains "${docker_run_line}" "-e SANDBOX_AGENT=claude-code" "isolation: SANDBOX_AGENT present"
 assert_contains "${docker_run_line}" "-e MY_SECRET" "isolation: declared secret present"
 assert_contains "${docker_run_line}" "-e APP_MODE=test" "isolation: declared env var present"
+rm -rf "${tmpdir}"
+
+# ============================================================================
+# AC: Podman Installation Verification (Story 4-1)
+# ============================================================================
+
+echo "# AC: Podman installation — generated Dockerfile contains Podman setup"
+
+rm -f "${PROJECT_ROOT}/.sandbox-dockerfile"
+tmpdir="$(mktemp -d)"
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+YAML
+set +e
+output_all="$(PATH="${BUILD_PATH}" bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "podman: build with minimal config exits 0"
+
+dockerfile_content="$(cat "${PROJECT_ROOT}/.sandbox-dockerfile")"
+
+# Test 4.1: generated Dockerfile contains Podman repository setup commands
+assert_contains "${dockerfile_content}" "download.opensuse.org" "podman: generated Dockerfile contains Kubic/OBS repository URL"
+assert_contains "${dockerfile_content}" "podman-kubic.gpg" "podman: generated Dockerfile contains GPG key setup"
+assert_contains "${dockerfile_content}" "apt-get update" "podman: generated Dockerfile contains apt-get update for repo"
+
+# Test 4.2: generated Dockerfile contains podman package installation
+assert_contains "${dockerfile_content}" "podman" "podman: generated Dockerfile installs podman"
+
+# Test 4.3: generated Dockerfile contains docker alias setup (podman-docker)
+assert_contains "${dockerfile_content}" "podman-docker" "podman: generated Dockerfile installs podman-docker for docker alias"
+assert_contains "${dockerfile_content}" "nodocker" "podman: generated Dockerfile creates nodocker marker"
+
+# Test 4.4: generated Dockerfile contains rootless configuration (subuid/subgid)
+assert_contains "${dockerfile_content}" "subuid" "podman: generated Dockerfile configures subuid for rootless"
+assert_contains "${dockerfile_content}" "subgid" "podman: generated Dockerfile configures subgid for rootless"
+assert_contains "${dockerfile_content}" "100000:65536" "podman: generated Dockerfile has correct UID/GID range"
+
+# Test 4.5: generated Dockerfile contains uidmap dependency
+assert_contains "${dockerfile_content}" "uidmap" "podman: generated Dockerfile installs uidmap for rootless"
+assert_contains "${dockerfile_content}" "fuse-overlayfs" "podman: generated Dockerfile installs fuse-overlayfs for storage"
+
+# Test: generated Dockerfile contains Docker Compose compatibility
+assert_contains "${dockerfile_content}" "podman-compose" "podman: generated Dockerfile installs podman-compose"
+assert_contains "${dockerfile_content}" "docker-compose" "podman: generated Dockerfile provides docker-compose wrapper"
+
 rm -rf "${tmpdir}"
 
 # ============================================================================

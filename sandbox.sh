@@ -312,6 +312,13 @@ process_template() {
 
   # Step 3: Substitute value placeholders
   local safe_val
+
+  # Derive Ubuntu version from BASE_IMAGE (e.g., "ubuntu:24.04@sha256:..." -> "24.04")
+  local ubuntu_version
+  ubuntu_version="$(echo "${BASE_IMAGE}" | sed 's/[^:]*://; s/@.*//')"
+  safe_val="$(sed_escape_replacement "${ubuntu_version}")"
+  template="$(echo "${template}" | sed "s|{{UBUNTU_VERSION}}|${safe_val}|g")"
+
   safe_val="$(sed_escape_replacement "${BASE_IMAGE}")"
   template="$(echo "${template}" | sed "s|{{BASE_IMAGE}}|${safe_val}|g")"
 

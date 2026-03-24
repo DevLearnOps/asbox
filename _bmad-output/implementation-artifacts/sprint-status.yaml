@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-03-24
-last_updated: 2026-03-24
+last_updated: 2026-03-24T00:00:00
 project: sandbox
 
 
@@ -46,7 +46,7 @@ story_location: "{project-root}/_bmad-output/implementation-artifacts"
 
 development_status:
   # Epic 1: Sandbox Foundation -- Developer Can Build and Launch a Sandbox
-  epic-1: in-progress
+  epic-1: done
   1-1-cli-skeleton-and-dependency-validation: done
   1-2-configuration-initialization: done
   1-3-configuration-parsing: done
@@ -56,7 +56,7 @@ development_status:
   epic-1-retrospective: optional
 
   # Epic 2: Project Integration -- Agent Can Work With Project Files and Git
-  epic-2: in-progress
+  epic-2: done
   2-1-host-directory-mounts: done
   2-2-secret-injection-and-validation: done
   2-3-agent-runtime-with-project-files-and-bmad-support: done
@@ -64,14 +64,14 @@ development_status:
   epic-2-retrospective: optional
 
   # Epic 3: Isolation Boundaries -- Sandbox Enforces Security Constraints
-  epic-3: in-progress
+  epic-3: done
   3-1-git-push-blocking: done
   3-2-filesystem-and-credential-isolation: done
   epic-3-retrospective: optional
 
   # Epic 4: Inner Container Runtime -- Agent Can Build and Run Docker Services
-  epic-4: backlog
-  4-1-podman-installation-and-docker-alias: backlog
+  epic-4: in-progress
+  4-1-podman-installation-and-docker-alias: review
   4-2-building-and-running-inner-containers: backlog
   4-3-isolation-scripts-baked-into-image: backlog
   epic-4-retrospective: optional
