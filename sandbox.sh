@@ -81,6 +81,8 @@ CFG_MOUNT_TARGETS=()
 CFG_ENV_KEYS=()
 CFG_ENV_VALUES=()
 RESOLVED_DOCKERFILE=""
+CONTENT_HASH=""
+IMAGE_TAG=""
 
 # ============================================================================
 # Config parsing functions
@@ -184,6 +186,54 @@ sed_escape_replacement() {
 # Ubuntu 24.04 LTS pinned to digest for reproducible builds
 readonly BASE_IMAGE="ubuntu:24.04@sha256:186072bba1b2f436cbb91ef2567abca677337cfc786c86e107d25b7072feef0c"
 
+compute_content_hash() {
+  local hash_cmd
+  if command -v sha256sum >/dev/null 2>&1; then
+    hash_cmd=(sha256sum)
+  elif command -v shasum >/dev/null 2>&1; then
+    hash_cmd=(shasum -a 256)
+  else
+    die "neither sha256sum nor shasum found" 1
+  fi
+
+  local hash_input_1="${CONFIG_PATH}"
+  local hash_input_2="${SCRIPT_DIR}/Dockerfile.template"
+  local hash_input_3="${SCRIPT_DIR}/scripts/entrypoint.sh"
+  local hash_input_4="${SCRIPT_DIR}/scripts/git-wrapper.sh"
+
+  for f in "${hash_input_1}" "${hash_input_2}" "${hash_input_3}" "${hash_input_4}"; do
+    if [[ ! -f "${f}" ]]; then
+      die "hash input file not found: ${f}" 1
+    fi
+  done
+
+  local hash
+  hash="$(cat "${hash_input_1}" "${hash_input_2}" "${hash_input_3}" "${hash_input_4}" \
+    | "${hash_cmd[@]}" | cut -c1-12)"
+  if [[ -z "${hash}" ]]; then
+    die "content hash computation produced empty result" 1
+  fi
+  CONTENT_HASH="${hash}"
+}
+
+compute_image_tag() {
+  local project_name="sandbox"
+  local config_dir
+  config_dir="$(dirname "${CONFIG_PATH}")"
+  if [[ "$(basename "${config_dir}")" == ".sandbox" ]]; then
+    project_name="$(basename "$(cd "${config_dir}/.." && pwd)" 2>/dev/null)" || project_name="sandbox"
+  fi
+  if [[ -z "${project_name}" ]]; then
+    project_name="sandbox"
+  fi
+  # Sanitize for Docker tag: lowercase, strip invalid chars
+  project_name="$(echo "${project_name}" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_.-]//g')"
+  if [[ -z "${project_name}" ]]; then
+    project_name="sandbox"
+  fi
+  IMAGE_TAG="sandbox-${project_name}:${CONTENT_HASH}"
+}
+
 process_template() {
   local template_file="${SCRIPT_DIR}/Dockerfile.template"
   if [[ ! -f "${template_file}" ]]; then
@@ -284,7 +334,18 @@ cmd_build() {
   dockerfile_path="${SCRIPT_DIR}/.sandbox-dockerfile"
   echo "${RESOLVED_DOCKERFILE}" > "${dockerfile_path}"
   info "generated Dockerfile: ${dockerfile_path}"
-  info "not yet implemented"
+
+  compute_content_hash
+  compute_image_tag
+
+  if docker image inspect "${IMAGE_TAG}" >/dev/null 2>&1; then
+    info "image up to date: ${IMAGE_TAG}"
+    return 0
+  fi
+
+  info "building image: ${IMAGE_TAG}"
+  docker build -t "${IMAGE_TAG}" -f "${dockerfile_path}" "${SCRIPT_DIR}"
+  info "image built: ${IMAGE_TAG}"
 }
 
 # ============================================================================

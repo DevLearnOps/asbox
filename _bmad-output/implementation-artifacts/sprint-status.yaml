@@ -35,10 +35,11 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-03-24
-last_updated: 2026-03-24T14:00:00Z
+last_updated: 2026-03-24
 project: sandbox
 project_key: NOKEY
 tracking_system: file-system
+
 story_location: "{project-root}/_bmad-output/implementation-artifacts"
 
 development_status:
@@ -48,7 +49,7 @@ development_status:
   1-2-configuration-initialization: done
   1-3-configuration-parsing: done
   1-4-dockerfile-generation-from-template: done
-  1-5-image-build-with-content-hash-caching: backlog
+  1-5-image-build-with-content-hash-caching: done
   1-6-sandbox-run-with-tty-and-lifecycle: backlog
   epic-1-retrospective: optional
 
