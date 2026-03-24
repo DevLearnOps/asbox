@@ -66,7 +66,7 @@ development_status:
   # Epic 3: Isolation Boundaries -- Sandbox Enforces Security Constraints
   epic-3: in-progress
   3-1-git-push-blocking: done
-  3-2-filesystem-and-credential-isolation: backlog
+  3-2-filesystem-and-credential-isolation: done
   epic-3-retrospective: optional
 
   # Epic 4: Inner Container Runtime -- Agent Can Build and Run Docker Services

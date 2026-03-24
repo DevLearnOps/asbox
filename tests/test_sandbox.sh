@@ -2364,6 +2364,153 @@ assert_not_contains "${docker_run_line}" "--net=none" "docker run does not inclu
 rm -rf "${tmpdir}"
 
 # ============================================================================
+# Filesystem and Credential Isolation Verification (Story 3-2)
+# ============================================================================
+# Docker containers have their own filesystem root (the image) and do not
+# inherit the host environment. This means host paths like ~/.ssh, ~/.aws,
+# and host env vars are NOT accessible inside the container unless explicitly
+# mounted or passed via -e flags.
+#
+# These tests verify that sandbox.sh does NOT accidentally break Docker's
+# built-in isolation by adding --privileged, mounting the Docker socket,
+# using --env-file, or introducing implicit mounts or env vars.
+# They serve as regression guards: if someone later weakens isolation,
+# these tests will catch it.
+# ============================================================================
+
+echo "# Filesystem and Credential Isolation Verification"
+
+# Test: docker run does NOT contain --privileged flag (NFR4)
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+YAML
+set +e
+output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+set -e
+docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
+assert_contains "${docker_run_line}" "docker run" "isolation: docker run command was captured"
+assert_not_contains "${docker_run_line}" "--privileged" "docker run must not use --privileged flag"
+rm -rf "${tmpdir}"
+
+# Test: docker run does NOT mount Docker socket (NFR4)
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+YAML
+set +e
+output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+set -e
+docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
+assert_contains "${docker_run_line}" "docker run" "isolation: docker run command was captured"
+assert_not_contains "${docker_run_line}" "/var/run/docker.sock" "docker run must not mount Docker socket"
+rm -rf "${tmpdir}"
+
+# Test: docker run does NOT contain --env-file flag
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+YAML
+set +e
+output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+set -e
+docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
+assert_contains "${docker_run_line}" "docker run" "isolation: docker run command was captured"
+assert_not_contains "${docker_run_line}" "--env-file" "docker run must not use --env-file"
+rm -rf "${tmpdir}"
+
+# Test: with no secrets and no env vars, only SANDBOX_AGENT env var present
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+YAML
+set +e
+output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+set -e
+docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
+e_count="$(echo "${docker_run_line}" | grep -o ' -e ' | wc -l | tr -d ' ')"
+if [[ "${e_count}" -eq 1 ]]; then
+  pass "isolation: only SANDBOX_AGENT -e flag when no secrets/env configured (count: ${e_count})"
+else
+  fail "isolation: only SANDBOX_AGENT -e flag when no secrets/env configured" "expected 1, got ${e_count}"
+fi
+assert_contains "${docker_run_line}" "-e SANDBOX_AGENT=claude-code" "isolation: SANDBOX_AGENT is the sole env var"
+rm -rf "${tmpdir}"
+
+# Test: with zero mounts configured, docker run has zero -v flags (NFR6)
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+YAML
+set +e
+output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+set -e
+docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
+assert_contains "${docker_run_line}" "docker run" "isolation: docker run command was captured"
+assert_not_contains "${docker_run_line}" " -v " "isolation: no volume mounts when none configured"
+rm -rf "${tmpdir}"
+
+# Test: with declared mounts, only declared -v flags present (NFR6)
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin" "${tmpdir}/project"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<YAML
+agent: claude-code
+mounts:
+  - source: ./project
+    target: /workspace
+YAML
+set +e
+output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+set -e
+docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
+v_count="$(echo "${docker_run_line}" | grep -o ' -v ' | wc -l | tr -d ' ')"
+if [[ "${v_count}" -eq 1 ]]; then
+  pass "isolation: exactly 1 -v flag for 1 declared mount (count: ${v_count})"
+else
+  fail "isolation: exactly 1 -v flag for 1 declared mount" "expected 1, got ${v_count}"
+fi
+assert_contains "${docker_run_line}" ":/workspace" "isolation: declared mount target is present"
+rm -rf "${tmpdir}"
+
+# Test: with secrets and env vars, only expected -e flags present (NFR1)
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<YAML
+agent: claude-code
+secrets:
+  - MY_SECRET
+env:
+  APP_MODE: test
+YAML
+set +e
+output_all="$(MY_SECRET=val PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+set -e
+docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
+# Expect exactly 3 -e flags: SANDBOX_AGENT, MY_SECRET, APP_MODE
+e_count="$(echo "${docker_run_line}" | grep -o ' -e ' | wc -l | tr -d ' ')"
+if [[ "${e_count}" -eq 3 ]]; then
+  pass "isolation: exactly 3 -e flags for 1 secret + 1 env var + SANDBOX_AGENT (count: ${e_count})"
+else
+  fail "isolation: exactly 3 -e flags for 1 secret + 1 env var + SANDBOX_AGENT" "expected 3, got ${e_count}"
+fi
+assert_contains "${docker_run_line}" "-e SANDBOX_AGENT=claude-code" "isolation: SANDBOX_AGENT present"
+assert_contains "${docker_run_line}" "-e MY_SECRET" "isolation: declared secret present"
+assert_contains "${docker_run_line}" "-e APP_MODE=test" "isolation: declared env var present"
+rm -rf "${tmpdir}"
+
+# ============================================================================
 # Summary
 # ============================================================================
 
