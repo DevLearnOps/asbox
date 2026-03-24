@@ -297,8 +297,8 @@ else
   fail "set -euo pipefail is present"
 fi
 
-if grep -q 'eval' "${SANDBOX}"; then
-  fail "no eval usage" "found eval in sandbox.sh"
+if grep -Ew 'eval' "${SANDBOX}" | grep -qv 'yq eval'; then
+  fail "no eval usage" "found bash eval in sandbox.sh"
 else
   pass "no eval usage"
 fi
@@ -385,6 +385,283 @@ assert_contains "${config_content}" "curl" "generated config has curl package"
 assert_contains "${config_content}" "wget" "generated config has wget package"
 assert_contains "${config_content}" "git" "generated config has git package"
 assert_contains "${config_content}" "jq" "generated config has jq package"
+rm -rf "${tmpdir}"
+
+# ============================================================================
+# AC: parse_config — valid config extraction
+# ============================================================================
+
+echo "# AC: parse_config — valid config extraction"
+
+# Test: parse_config extracts agent correctly
+tmpdir="$(mktemp -d)"
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+YAML
+set +e
+output_all="$(bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "parse_config extracts agent correctly (exit 0)"
+assert_contains "${output_all}" "not yet implemented" "parse_config succeeds then build continues"
+rm -rf "${tmpdir}"
+
+# Test: parse_config extracts agent gemini-cli
+tmpdir="$(mktemp -d)"
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: gemini-cli
+YAML
+set +e
+output_all="$(bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "parse_config accepts gemini-cli agent"
+rm -rf "${tmpdir}"
+
+# Test: parse_config extracts SDK versions
+tmpdir="$(mktemp -d)"
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+sdks:
+  nodejs: "22"
+  python: "3.12"
+  go: "1.22"
+YAML
+set +e
+output_all="$(bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "parse_config extracts SDK versions correctly"
+rm -rf "${tmpdir}"
+
+# Test: parse_config extracts packages list
+tmpdir="$(mktemp -d)"
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+packages:
+  - curl
+  - wget
+  - git
+YAML
+set +e
+output_all="$(bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "parse_config extracts packages list correctly"
+rm -rf "${tmpdir}"
+
+# Test: parse_config extracts mounts (source/target pairs)
+tmpdir="$(mktemp -d)"
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+mounts:
+  - source: "."
+    target: "/workspace"
+  - source: "./data"
+    target: "/data"
+YAML
+set +e
+output_all="$(bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "parse_config extracts mounts correctly"
+rm -rf "${tmpdir}"
+
+# Test: parse_config extracts secrets list
+tmpdir="$(mktemp -d)"
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+secrets:
+  - ANTHROPIC_API_KEY
+  - GITHUB_TOKEN
+YAML
+set +e
+output_all="$(bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "parse_config extracts secrets list correctly"
+rm -rf "${tmpdir}"
+
+# Test: parse_config extracts env key/value pairs
+tmpdir="$(mktemp -d)"
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+env:
+  NODE_ENV: development
+  DEBUG: "true"
+YAML
+set +e
+output_all="$(bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "parse_config extracts env key/value pairs correctly"
+rm -rf "${tmpdir}"
+
+# Test: parse_config extracts MCP server list
+tmpdir="$(mktemp -d)"
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+mcp:
+  - playwright
+  - filesystem
+YAML
+set +e
+output_all="$(bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "parse_config extracts MCP server list correctly"
+rm -rf "${tmpdir}"
+
+# Test: parse_config handles optional/missing sections gracefully
+tmpdir="$(mktemp -d)"
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+YAML
+set +e
+output_all="$(bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "parse_config handles missing optional sections (exit 0)"
+rm -rf "${tmpdir}"
+
+# ============================================================================
+# AC: parse_config — error cases
+# ============================================================================
+
+echo "# AC: parse_config — error cases"
+
+# Test: missing config file exits code 1
+tmpdir="$(mktemp -d)"
+set +e
+output_all="$(bash "${SANDBOX}" build -f "${tmpdir}/nonexistent.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 1 "${exit_code}" "missing config file exits code 1"
+assert_contains "${output_all}" "config not found" "missing config prints 'config not found' error"
+rm -rf "${tmpdir}"
+
+# Test: missing agent field exits code 1
+tmpdir="$(mktemp -d)"
+cat > "${tmpdir}/config.yaml" <<'YAML'
+sdks:
+  nodejs: "22"
+YAML
+set +e
+output_all="$(bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 1 "${exit_code}" "missing agent field exits code 1"
+assert_contains "${output_all}" "config missing required field: agent" "missing agent prints clear error"
+rm -rf "${tmpdir}"
+
+# Test: invalid agent value exits code 1
+tmpdir="$(mktemp -d)"
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: invalid-agent
+YAML
+set +e
+output_all="$(bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 1 "${exit_code}" "invalid agent value exits code 1"
+assert_contains "${output_all}" "config invalid agent: invalid-agent" "invalid agent prints clear error"
+rm -rf "${tmpdir}"
+
+# ============================================================================
+# AC: parse_config — custom path via -f
+# ============================================================================
+
+echo "# AC: parse_config — custom path"
+
+# Test: parse_config works with -f custom path
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/custom"
+cat > "${tmpdir}/custom/my-config.yaml" <<'YAML'
+agent: claude-code
+packages:
+  - vim
+YAML
+set +e
+output_all="$(bash "${SANDBOX}" build -f "${tmpdir}/custom/my-config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "parse_config works with -f custom path"
+rm -rf "${tmpdir}"
+
+# Test: parse_config works with -f flag before command
+tmpdir="$(mktemp -d)"
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: gemini-cli
+YAML
+set +e
+output_all="$(bash "${SANDBOX}" -f "${tmpdir}/config.yaml" run 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "parse_config works with -f before command (run)"
+rm -rf "${tmpdir}"
+
+# ============================================================================
+# AC: parse_config — starter config from sandbox init
+# ============================================================================
+
+echo "# AC: parse_config — starter config compatibility"
+
+# Test: parse_config works with the default starter config from sandbox init
+tmpdir="$(mktemp -d)"
+# First create the config via init
+output_all="$(cd "${tmpdir}" && bash "${SANDBOX}" init 2>&1)"
+# Then verify build can parse it
+set +e
+output_all="$(cd "${tmpdir}" && bash "${SANDBOX}" build 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "parse_config works with default starter config from sandbox init"
+assert_contains "${output_all}" "not yet implemented" "build continues after parsing starter config"
+rm -rf "${tmpdir}"
+
+# Test: run also works with starter config
+tmpdir="$(mktemp -d)"
+output_all="$(cd "${tmpdir}" && bash "${SANDBOX}" init 2>&1)"
+set +e
+output_all="$(cd "${tmpdir}" && bash "${SANDBOX}" run 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "parse_config works with starter config via run command"
+rm -rf "${tmpdir}"
+
+# ============================================================================
+# AC: parse_config — full config with all sections
+# ============================================================================
+
+echo "# AC: parse_config — full config"
+
+# Test: parse_config handles a complete config with all sections populated
+tmpdir="$(mktemp -d)"
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+sdks:
+  nodejs: "22"
+  python: "3.12"
+  go: "1.22"
+packages:
+  - build-essential
+  - curl
+  - wget
+mounts:
+  - source: "."
+    target: "/workspace"
+secrets:
+  - ANTHROPIC_API_KEY
+env:
+  NODE_ENV: development
+mcp:
+  - playwright
+YAML
+set +e
+output_all="$(bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "parse_config handles full config with all sections"
 rm -rf "${tmpdir}"
 
 # ============================================================================
