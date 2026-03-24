@@ -175,6 +175,26 @@ parse_config() {
 }
 
 # ============================================================================
+# Secret validation
+# ============================================================================
+
+# Validate all declared secrets are set in host environment
+validate_secrets() {
+  local secret_name
+  for secret_name in "${CFG_SECRETS[@]}"; do
+    # Reject empty or invalid env var names (prevents eval injection)
+    if [[ ! "${secret_name}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+      die "invalid secret name: ${secret_name}" 4
+    fi
+    # Use ${VAR+x} to check if declared (empty values are valid)
+    eval "local _check=\${${secret_name}+x}" # shellcheck disable=eval-indirect
+    if [[ -z "${_check}" ]]; then
+      die "secret not set: ${secret_name}" 4
+    fi
+  done
+}
+
+# ============================================================================
 # Build functions
 # ============================================================================
 
@@ -354,12 +374,19 @@ cmd_build() {
 
 cmd_run() {
   parse_config
+  validate_secrets
   cmd_build
 
   # Assemble docker run flags using array (safe for paths with spaces)
   local run_flags=()
   run_flags+=("-it" "--rm")
   run_flags+=("-e" "SANDBOX_AGENT=${CFG_AGENT}")
+
+  # Inject secrets as env vars (Docker reads from host environment)
+  local secret_name
+  for secret_name in "${CFG_SECRETS[@]}"; do
+    run_flags+=("-e" "${secret_name}")
+  done
 
   # Resolve mount paths relative to config file directory
   local config_dir

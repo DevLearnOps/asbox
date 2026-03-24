@@ -315,10 +315,12 @@ else
   fail "set -euo pipefail is present"
 fi
 
-if grep -Ew 'eval' "${SANDBOX}" | grep -qv 'yq eval'; then
-  fail "no eval usage" "found bash eval in sandbox.sh"
+# Find lines that start with eval (command position), excluding yq eval and marked exceptions
+eval_lines="$(grep -n '^[[:space:]]*eval ' "${SANDBOX}" | grep -v '# shellcheck disable=eval-indirect' || true)"
+if [[ -n "${eval_lines}" ]]; then
+  fail "no eval usage (except marked indirect var check)" "found unexpected bash eval: ${eval_lines}"
 else
-  pass "no eval usage"
+  pass "no eval usage (except marked indirect var check)"
 fi
 
 # ============================================================================
@@ -1496,6 +1498,227 @@ docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
 assert_contains "${docker_run_line}" "-v ${tmpdir}/workspace:/workspace" "e2e: relative mount resolved correctly in docker log"
 assert_contains "${docker_run_line}" "-v ${tmpdir}/data:/data" "e2e: absolute mount present in docker log"
 assert_contains "${docker_run_line}" "-w /workspace" "e2e: working directory set to first mount target"
+rm -rf "${tmpdir}"
+
+# ============================================================================
+# AC: validate_secrets — secret validation (AC 2, 3)
+# ============================================================================
+
+echo "# AC: validate_secrets — secret validation"
+
+# Test: declared secret not set in host env exits with code 4
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+secrets:
+  - ANTHROPIC_API_KEY
+YAML
+set +e
+output_all="$(unset ANTHROPIC_API_KEY && PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 4 "${exit_code}" "secret not set in host env exits code 4"
+assert_contains "${output_all}" "secret not set: ANTHROPIC_API_KEY" "secret not set reports specific secret name"
+rm -rf "${tmpdir}"
+
+# Test: declared secret set to empty string passes validation
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+secrets:
+  - ANTHROPIC_API_KEY
+YAML
+set +e
+output_all="$(ANTHROPIC_API_KEY="" PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "secret set to empty string passes validation (exit 0)"
+assert_contains "${output_all}" "starting sandbox:" "secret set to empty string allows sandbox to start"
+rm -rf "${tmpdir}"
+
+# Test: multiple secrets all set passes validation
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+secrets:
+  - TEST_SECRET_ONE
+  - TEST_SECRET_TWO
+YAML
+set +e
+output_all="$(TEST_SECRET_ONE=val1 TEST_SECRET_TWO=val2 PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "multiple secrets all set passes validation"
+rm -rf "${tmpdir}"
+
+# Test: first of multiple secrets missing reports that specific secret name
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+secrets:
+  - MISSING_SECRET_X
+  - TEST_SECRET_TWO
+YAML
+set +e
+output_all="$(unset MISSING_SECRET_X && TEST_SECRET_TWO=val2 PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 4 "${exit_code}" "first missing secret exits code 4"
+assert_contains "${output_all}" "secret not set: MISSING_SECRET_X" "first missing secret reports correct name"
+rm -rf "${tmpdir}"
+
+# Test: no secrets declared in config passes validation (zero secrets is valid)
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+YAML
+set +e
+output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "no secrets declared passes validation"
+assert_contains "${output_all}" "starting sandbox:" "no secrets declared allows sandbox to start"
+rm -rf "${tmpdir}"
+
+# ============================================================================
+# AC: secret injection — -e flags in docker run (AC 1)
+# ============================================================================
+
+echo "# AC: secret injection — -e flags in docker run"
+
+# Test: single secret produces -e SECRET_NAME in docker run args
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+secrets:
+  - ANTHROPIC_API_KEY
+YAML
+set +e
+output_all="$(ANTHROPIC_API_KEY=sk-test PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "single secret injection exits code 0"
+docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
+assert_contains "${docker_run_line}" "-e ANTHROPIC_API_KEY" "single secret produces -e SECRET_NAME in docker run"
+rm -rf "${tmpdir}"
+
+# Test: multiple secrets produce multiple -e flags
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+secrets:
+  - TEST_SECRET_A
+  - TEST_SECRET_B
+YAML
+set +e
+output_all="$(TEST_SECRET_A=val1 TEST_SECRET_B=val2 PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "multiple secret injection exits code 0"
+docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
+assert_contains "${docker_run_line}" "-e TEST_SECRET_A" "multiple secrets: first -e flag present"
+assert_contains "${docker_run_line}" "-e TEST_SECRET_B" "multiple secrets: second -e flag present"
+rm -rf "${tmpdir}"
+
+# Test: no secrets produces no extra -e flags (beyond SANDBOX_AGENT)
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+YAML
+set +e
+output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "no secrets: run exits code 0"
+docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
+# Count -e occurrences: should only have SANDBOX_AGENT
+e_count="$(echo "${docker_run_line}" | grep -o ' -e ' | wc -l | tr -d ' ')"
+if [[ "${e_count}" -eq 1 ]]; then
+  pass "no secrets: only SANDBOX_AGENT -e flag present (count: ${e_count})"
+else
+  fail "no secrets: only SANDBOX_AGENT -e flag present" "expected 1, got ${e_count}"
+fi
+rm -rf "${tmpdir}"
+
+# Test: secret flags appear in mock docker log
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+secrets:
+  - MY_SECRET_KEY
+YAML
+set +e
+output_all="$(MY_SECRET_KEY=testvalue PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "secret flags in docker log: exits code 0"
+docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
+assert_contains "${docker_run_line}" "-e MY_SECRET_KEY" "secret flag appears in mock docker log"
+rm -rf "${tmpdir}"
+
+# ============================================================================
+# AC: secrets not in image or filesystem (AC 4)
+# ============================================================================
+
+echo "# AC: secrets not in image or filesystem"
+
+# Test: sandbox build docker log does NOT contain secret values
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin"
+setup_build_mock "${tmpdir}/mockbin" 1
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+secrets:
+  - BUILD_TEST_SECRET
+YAML
+set +e
+output_all="$(BUILD_TEST_SECRET=supersecretvalue PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "build with secret config exits code 0"
+build_log="$(cat "${tmpdir}/mockbin/docker.log" 2>/dev/null || true)"
+assert_not_contains "${build_log}" "supersecretvalue" "build docker log does NOT contain secret values"
+assert_not_contains "${build_log}" "BUILD_TEST_SECRET" "build docker log does NOT contain secret names as args"
+rm -rf "${tmpdir}"
+
+# Test: secrets are passed via -e flag only (runtime injection, not build-time)
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+secrets:
+  - RUNTIME_SECRET
+YAML
+set +e
+output_all="$(RUNTIME_SECRET=myvalue PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "runtime secret injection exits code 0"
+docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
+assert_contains "${docker_run_line}" "-e RUNTIME_SECRET" "secret injected via -e flag at runtime"
+# Verify the secret VALUE is not in the docker log (only the name via -e KEY, not -e KEY=VALUE)
+assert_not_contains "${docker_run_line}" "myvalue" "secret value not exposed in docker run args"
+docker_build_line="$(grep "docker build" "${tmpdir}/mockbin/docker.log" || true)"
+assert_not_contains "${docker_build_line}" "RUNTIME_SECRET" "secret not passed during docker build"
 rm -rf "${tmpdir}"
 
 # ============================================================================

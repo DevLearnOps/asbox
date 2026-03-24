@@ -38,6 +38,7 @@ generated: 2026-03-24
 last_updated: 2026-03-24
 project: sandbox
 
+
 project_key: NOKEY
 tracking_system: file-system
 
@@ -57,7 +58,7 @@ development_status:
   # Epic 2: Project Integration -- Agent Can Work With Project Files and Git
   epic-2: in-progress
   2-1-host-directory-mounts: done
-  2-2-secret-injection-and-validation: backlog
+  2-2-secret-injection-and-validation: done
   2-3-agent-runtime-with-project-files-and-bmad-support: backlog
   2-4-git-and-cli-toolchain: backlog
   epic-2-retrospective: optional
