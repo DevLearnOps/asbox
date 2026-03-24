@@ -1,6 +1,6 @@
 # Story 1.1: CLI Skeleton and Dependency Validation
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -28,30 +28,30 @@ so that I know the tool is working and will fail clearly if prerequisites are mi
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Create project directory structure (AC: all)
-  - [ ] Create `sandbox.sh` at project root with shebang, `set -euo pipefail`, and empty function stubs
-  - [ ] Create `scripts/` directory with placeholder `entrypoint.sh` and `git-wrapper.sh`
-  - [ ] Create `templates/` directory with placeholder `config.yaml`
-  - [ ] Create placeholder `Dockerfile.template`
-- [ ] Task 2: Implement utility functions (AC: 2, 3, 4)
-  - [ ] Implement `die()` — prints "error: <message>" to stderr, exits with given code
-  - [ ] Implement `info()` — prints plain text to stdout
-  - [ ] Implement `warn()` — prints "warning: <message>" to stderr
-- [ ] Task 3: Implement dependency validation (AC: 2, 3, 4)
-  - [ ] Implement `check_dependencies()` function
-  - [ ] Bash version check: `BASH_VERSINFO[0] >= 4`, exit 3 on failure
-  - [ ] Docker check: `command -v docker`, exit 3 with "error: docker not found"
-  - [ ] yq check: `command -v yq`, then parse `yq --version` output to verify v4+, exit 3 on failure
-- [ ] Task 4: Implement help and command dispatch (AC: 1)
-  - [ ] Implement `show_help()` — displays usage with commands (init, build, run) and flags (-f, --help)
-  - [ ] Implement argument parsing: handle `--help`, `-f <path>`, and command dispatch
-  - [ ] Route to stub functions for `init`, `build`, `run` (print "not yet implemented" and exit 0)
-  - [ ] Unknown command/flag: exit 2 with usage error
-- [ ] Task 5: Wire up main entry point (AC: all)
-  - [ ] bash version check runs FIRST (before anything else, since other checks may use bash 4+ features)
-  - [ ] `check_dependencies()` runs before any command dispatch
-  - [ ] `main()` function ties it all together
-  - [ ] Make `sandbox.sh` executable
+- [x] Task 1: Create project directory structure (AC: all)
+  - [x] Create `sandbox.sh` at project root with shebang, `set -euo pipefail`, and empty function stubs
+  - [x] Create `scripts/` directory with placeholder `entrypoint.sh` and `git-wrapper.sh`
+  - [x] Create `templates/` directory with placeholder `config.yaml`
+  - [x] Create placeholder `Dockerfile.template`
+- [x] Task 2: Implement utility functions (AC: 2, 3, 4)
+  - [x] Implement `die()` — prints "error: <message>" to stderr, exits with given code
+  - [x] Implement `info()` — prints plain text to stdout
+  - [x] Implement `warn()` — prints "warning: <message>" to stderr
+- [x] Task 3: Implement dependency validation (AC: 2, 3, 4)
+  - [x] Implement `check_dependencies()` function
+  - [x] Bash version check: `BASH_VERSINFO[0] >= 4`, exit 3 on failure
+  - [x] Docker check: `command -v docker`, exit 3 with "error: docker not found"
+  - [x] yq check: `command -v yq`, then parse `yq --version` output to verify v4+, exit 3 on failure
+- [x] Task 4: Implement help and command dispatch (AC: 1)
+  - [x] Implement `show_help()` — displays usage with commands (init, build, run) and flags (-f, --help)
+  - [x] Implement argument parsing: handle `--help`, `-f <path>`, and command dispatch
+  - [x] Route to stub functions for `init`, `build`, `run` (print "not yet implemented" and exit 0)
+  - [x] Unknown command/flag: exit 2 with usage error
+- [x] Task 5: Wire up main entry point (AC: all)
+  - [x] bash version check runs FIRST (before anything else, since other checks may use bash 4+ features)
+  - [x] `check_dependencies()` runs before any command dispatch
+  - [x] `main()` function ties it all together
+  - [x] Make `sandbox.sh` executable
 
 ## Dev Notes
 
@@ -154,8 +154,33 @@ Placeholder files should have a shebang (for .sh files) and a comment indicating
 
 ### Agent Model Used
 
+Claude Opus 4.6 (1M context)
+
 ### Debug Log References
+
+- Fixed yq version parsing to handle both Mike Farah's Go yq (`v4.44.1` format) and version strings without `v` prefix (`3.4.1` format)
 
 ### Completion Notes List
 
+- Created project directory structure with sandbox.sh, scripts/, templates/, and placeholder files
+- Implemented utility functions: die() (stderr + exit code), info() (stdout), warn() (stderr)
+- Implemented check_bash_version() using BASH_VERSINFO[0] — runs first before any bash 4+ features
+- Implemented check_dependencies() for docker (binary presence) and yq (presence + version >= 4)
+- Implemented show_help() with usage info for commands (init, build, run) and flags (-f, --help)
+- Implemented argument parsing with command dispatch to stub functions
+- All error output goes to stderr, info to stdout, no color codes
+- Exit codes: 0 (success), 2 (usage error), 3 (dependency error)
+- Created comprehensive test suite (40 tests) covering all 4 acceptance criteria plus structure, streams, and quality checks
+
+### Change Log
+
+- 2026-03-24: Initial implementation of CLI skeleton and dependency validation (all 5 tasks completed)
+
 ### File List
+
+- sandbox.sh (new) — CLI entry point with dependency checks, help, and command dispatch
+- scripts/entrypoint.sh (new) — Placeholder for later story
+- scripts/git-wrapper.sh (new) — Placeholder for later story
+- templates/config.yaml (new) — Placeholder for later story
+- Dockerfile.template (new) — Placeholder for later story
+- tests/test_sandbox.sh (new) — Test suite with 40 tests covering all acceptance criteria
