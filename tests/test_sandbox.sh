@@ -2182,7 +2182,7 @@ wrapper_ops="${tmpdir}/git-wrapper-ops.sh"
 sed "s|/usr/bin/git|${mock_git_ops}|g" "${GIT_WRAPPER}" > "${wrapper_ops}"
 chmod +x "${wrapper_ops}"
 
-for op in add commit log diff branch checkout merge push; do
+for op in add commit log diff branch checkout merge; do
   set +e
   output_all="$(bash "${wrapper_ops}" "${op}" 2>&1)"
   exit_code=$?
@@ -2198,6 +2198,112 @@ exit_code=$?
 set -e
 assert_exit_code 0 "${exit_code}" "git wrapper passes through 'commit --amend' operation"
 assert_contains "${output_all}" "OP:commit --amend" "git wrapper forwards 'commit --amend' to real git"
+
+rm -rf "${tmpdir}"
+
+# ============================================================================
+# AC: git-wrapper.sh — git push is blocked with authentication error
+# ============================================================================
+
+echo "# AC: git-wrapper.sh — git push is blocked with authentication error"
+
+GIT_WRAPPER="${PROJECT_ROOT}/scripts/git-wrapper.sh"
+
+# Test: git push is blocked with exit code 1 and stderr contains auth error
+tmpdir="$(mktemp -d)"
+wrapper_copy="${tmpdir}/git-wrapper-test.sh"
+cp "${GIT_WRAPPER}" "${wrapper_copy}"
+chmod +x "${wrapper_copy}"
+
+set +e
+stderr_out="$(bash "${wrapper_copy}" push 2>&1 1>/dev/null)"
+exit_code=$?
+set -e
+assert_exit_code 1 "${exit_code}" "git wrapper blocks push with exit code 1"
+assert_contains "${stderr_out}" "fatal: Authentication failed" "git wrapper returns authentication error on push (stderr)"
+
+# Test: git push origin main is blocked
+set +e
+stderr_out="$(bash "${wrapper_copy}" push origin main 2>&1 1>/dev/null)"
+exit_code=$?
+set -e
+assert_exit_code 1 "${exit_code}" "git wrapper blocks 'push origin main'"
+assert_contains "${stderr_out}" "fatal: Authentication failed" "git wrapper returns auth error on 'push origin main' (stderr)"
+
+# Test: git push --force is blocked
+set +e
+stderr_out="$(bash "${wrapper_copy}" push --force 2>&1 1>/dev/null)"
+exit_code=$?
+set -e
+assert_exit_code 1 "${exit_code}" "git wrapper blocks 'push --force'"
+assert_contains "${stderr_out}" "fatal: Authentication failed" "git wrapper returns auth error on 'push --force' (stderr)"
+
+# Test: git push --all is blocked
+set +e
+stderr_out="$(bash "${wrapper_copy}" push --all 2>&1 1>/dev/null)"
+exit_code=$?
+set -e
+assert_exit_code 1 "${exit_code}" "git wrapper blocks 'push --all'"
+assert_contains "${stderr_out}" "fatal: Authentication failed" "git wrapper returns auth error on 'push --all' (stderr)"
+
+# Test: git push -u origin feature-branch is blocked
+set +e
+stderr_out="$(bash "${wrapper_copy}" push -u origin feature-branch 2>&1 1>/dev/null)"
+exit_code=$?
+set -e
+assert_exit_code 1 "${exit_code}" "git wrapper blocks 'push -u origin feature-branch'"
+assert_contains "${stderr_out}" "fatal: Authentication failed" "git wrapper returns auth error on 'push -u origin feature-branch' (stderr)"
+
+rm -rf "${tmpdir}"
+
+# ============================================================================
+# AC: git-wrapper.sh — non-push operations still pass through after push blocking
+# ============================================================================
+
+echo "# AC: git-wrapper.sh — non-push operations still pass through after push blocking"
+
+tmpdir="$(mktemp -d)"
+mock_git="${tmpdir}/git-ops"
+cat > "${mock_git}" <<'MOCK'
+#!/usr/bin/env bash
+echo "OP:$*"
+MOCK
+chmod +x "${mock_git}"
+wrapper_ops="${tmpdir}/git-wrapper-ops.sh"
+sed "s|/usr/bin/git|${mock_git}|g" "${GIT_WRAPPER}" > "${wrapper_ops}"
+chmod +x "${wrapper_ops}"
+
+# Test: git pull still passes through to real git
+set +e
+output_all="$(bash "${wrapper_ops}" pull 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "git pull passes through after push blocking"
+assert_contains "${output_all}" "OP:pull" "git pull forwards to real git"
+
+# Test: git fetch still passes through to real git
+set +e
+output_all="$(bash "${wrapper_ops}" fetch 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "git fetch passes through after push blocking"
+assert_contains "${output_all}" "OP:fetch" "git fetch forwards to real git"
+
+# Test: git commit --amend still passes through (not confused with push)
+set +e
+output_all="$(bash "${wrapper_ops}" commit --amend 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "git commit --amend passes through after push blocking"
+assert_contains "${output_all}" "OP:commit --amend" "git commit --amend forwards to real git"
+
+# Test: git stash push passes through (stash is first arg, not push)
+set +e
+output_all="$(bash "${wrapper_ops}" stash push 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "git stash push passes through (not confused with push)"
+assert_contains "${output_all}" "OP:stash push" "git stash push forwards to real git correctly"
 
 rm -rf "${tmpdir}"
 
