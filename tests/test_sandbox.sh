@@ -1330,6 +1330,175 @@ fi
 rm -rf "${tmpdir}"
 
 # ============================================================================
+# AC: cmd_run — mount flag assembly and path resolution
+# ============================================================================
+
+echo "# AC: cmd_run — mount flag assembly and path resolution"
+
+# Test: single mount {source: ".", target: "/workspace"} produces -v /abs/path:/workspace flag
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin" "${tmpdir}/project/.sandbox"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/project/.sandbox/config.yaml" <<'YAML'
+agent: claude-code
+mounts:
+  - source: ".."
+    target: "/workspace"
+YAML
+set +e
+output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/project/.sandbox/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "sandbox run with single mount exits code 0"
+docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
+assert_contains "${docker_run_line}" "-v ${tmpdir}/project:/workspace" "single mount produces -v with resolved absolute path"
+rm -rf "${tmpdir}"
+
+# Test: relative source path resolved against config file directory, not $PWD
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin" "${tmpdir}/myproject/subdir/.sandbox"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/myproject/subdir/.sandbox/config.yaml" <<'YAML'
+agent: claude-code
+mounts:
+  - source: ".."
+    target: "/workspace"
+YAML
+set +e
+# Run from a DIFFERENT directory than where the config lives
+output_all="$(cd "${tmpdir}" && PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/myproject/subdir/.sandbox/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "sandbox run with relative mount from different PWD exits code 0"
+docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
+# ".." relative to config dir (.sandbox/) should resolve to subdir/, not to $PWD
+assert_contains "${docker_run_line}" "-v ${tmpdir}/myproject/subdir:/workspace" "relative path resolves against config dir, not PWD"
+rm -rf "${tmpdir}"
+
+# Test: multiple mounts produce multiple -v flags in docker run
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin" "${tmpdir}/project" "${tmpdir}/shared"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<YAML
+agent: claude-code
+mounts:
+  - source: "${tmpdir}/project"
+    target: "/workspace"
+  - source: "${tmpdir}/shared"
+    target: "/shared"
+YAML
+set +e
+output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "sandbox run with multiple mounts exits code 0"
+docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
+assert_contains "${docker_run_line}" "-v ${tmpdir}/project:/workspace" "first mount -v flag present"
+assert_contains "${docker_run_line}" "-v ${tmpdir}/shared:/shared" "second mount -v flag present"
+rm -rf "${tmpdir}"
+
+# Test: -w flag is set to first mount's target path
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin" "${tmpdir}/project"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<YAML
+agent: claude-code
+mounts:
+  - source: "${tmpdir}/project"
+    target: "/workspace"
+YAML
+set +e
+output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+set -e
+docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
+assert_contains "${docker_run_line}" "-w /workspace" "docker run includes -w set to first mount target"
+rm -rf "${tmpdir}"
+
+# Test: sandbox run with no mounts in config produces no -v flags
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+YAML
+set +e
+output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "sandbox run with no mounts exits code 0"
+docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
+assert_not_contains "${docker_run_line}" "-v " "no -v flags when config has no mounts"
+assert_not_contains "${docker_run_line}" "-w " "no -w flag when config has no mounts"
+rm -rf "${tmpdir}"
+
+# Test: absolute source paths are passed through unchanged
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin" "${tmpdir}/abs-data"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<YAML
+agent: claude-code
+mounts:
+  - source: "${tmpdir}/abs-data"
+    target: "/data"
+YAML
+set +e
+output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+set -e
+docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
+assert_contains "${docker_run_line}" "-v ${tmpdir}/abs-data:/data" "absolute source path passed through unchanged"
+rm -rf "${tmpdir}"
+
+# ============================================================================
+# AC: cmd_run — end-to-end mount behavior
+# ============================================================================
+
+echo "# AC: cmd_run — end-to-end mount behavior"
+
+# Test: config with mounts uncommented passes parse + build + run without errors
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin" "${tmpdir}/project/.sandbox"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/project/.sandbox/config.yaml" <<'YAML'
+agent: claude-code
+sdks:
+  nodejs: "22"
+mounts:
+  - source: ".."
+    target: "/workspace"
+YAML
+set +e
+output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/project/.sandbox/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "e2e: config with mounts passes parse+build+run"
+assert_contains "${output_all}" "starting sandbox:" "e2e: sandbox starts successfully with mounts"
+rm -rf "${tmpdir}"
+
+# Test: verify mount flags appear in mock docker log with correct resolved paths
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin" "${tmpdir}/workspace/.sandbox" "${tmpdir}/data"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/workspace/.sandbox/config.yaml" <<YAML
+agent: claude-code
+mounts:
+  - source: ".."
+    target: "/workspace"
+  - source: "${tmpdir}/data"
+    target: "/data"
+YAML
+set +e
+output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/workspace/.sandbox/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "e2e: multi-mount config exits code 0"
+docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
+# Relative ".." from .sandbox/ should resolve to workspace/
+assert_contains "${docker_run_line}" "-v ${tmpdir}/workspace:/workspace" "e2e: relative mount resolved correctly in docker log"
+assert_contains "${docker_run_line}" "-v ${tmpdir}/data:/data" "e2e: absolute mount present in docker log"
+assert_contains "${docker_run_line}" "-w /workspace" "e2e: working directory set to first mount target"
+rm -rf "${tmpdir}"
+
+# ============================================================================
 # AC: entrypoint.sh — agent mapping and error handling
 # ============================================================================
 

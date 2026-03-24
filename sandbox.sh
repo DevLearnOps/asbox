@@ -355,10 +355,36 @@ cmd_build() {
 cmd_run() {
   parse_config
   cmd_build
+
+  # Assemble docker run flags using array (safe for paths with spaces)
+  local run_flags=()
+  run_flags+=("-it" "--rm")
+  run_flags+=("-e" "SANDBOX_AGENT=${CFG_AGENT}")
+
+  # Resolve mount paths relative to config file directory
+  local config_dir
+  config_dir="$(cd "$(dirname "${CONFIG_PATH}")" && pwd)"
+
+  local i
+  for i in "${!CFG_MOUNT_SOURCES[@]}"; do
+    local src="${CFG_MOUNT_SOURCES[$i]}"
+    local tgt="${CFG_MOUNT_TARGETS[$i]}"
+
+    # Resolve relative source paths against config file directory
+    if [[ "${src}" != /* ]]; then
+      src="$(cd "${config_dir}/${src}" && pwd)"
+    fi
+
+    run_flags+=("-v" "${src}:${tgt}")
+  done
+
+  # Set working directory to first mount target (if any mounts exist)
+  if [[ ${#CFG_MOUNT_TARGETS[@]} -gt 0 ]]; then
+    run_flags+=("-w" "${CFG_MOUNT_TARGETS[0]}")
+  fi
+
   info "starting sandbox: ${IMAGE_TAG}"
-  docker run -it --rm \
-    -e "SANDBOX_AGENT=${CFG_AGENT}" \
-    "${IMAGE_TAG}"
+  docker run "${run_flags[@]}" "${IMAGE_TAG}"
 }
 
 # ============================================================================
