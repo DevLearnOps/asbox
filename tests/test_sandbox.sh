@@ -427,6 +427,8 @@ echo "# AC: parse_config — valid config extraction"
 tmpdir="$(mktemp -d)"
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 YAML
 set +e
 output_all="$(PATH="${BUILD_PATH}" bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
@@ -440,6 +442,8 @@ rm -rf "${tmpdir}"
 tmpdir="$(mktemp -d)"
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: gemini-cli
+sdks:
+  nodejs: "22"
 YAML
 set +e
 output_all="$(PATH="${BUILD_PATH}" bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
@@ -468,6 +472,8 @@ rm -rf "${tmpdir}"
 tmpdir="$(mktemp -d)"
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 packages:
   - curl
   - wget
@@ -484,6 +490,8 @@ rm -rf "${tmpdir}"
 tmpdir="$(mktemp -d)"
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 mounts:
   - source: "."
     target: "/workspace"
@@ -501,6 +509,8 @@ rm -rf "${tmpdir}"
 tmpdir="$(mktemp -d)"
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 secrets:
   - ANTHROPIC_API_KEY
   - GITHUB_TOKEN
@@ -516,6 +526,8 @@ rm -rf "${tmpdir}"
 tmpdir="$(mktemp -d)"
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 env:
   NODE_ENV: development
   DEBUG: "true"
@@ -547,6 +559,8 @@ rm -rf "${tmpdir}"
 tmpdir="$(mktemp -d)"
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 YAML
 set +e
 output_all="$(PATH="${BUILD_PATH}" bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
@@ -609,6 +623,8 @@ tmpdir="$(mktemp -d)"
 mkdir -p "${tmpdir}/custom"
 cat > "${tmpdir}/custom/my-config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 packages:
   - vim
 YAML
@@ -623,6 +639,8 @@ rm -rf "${tmpdir}"
 tmpdir="$(mktemp -d)"
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: gemini-cli
+sdks:
+  nodejs: "22"
 YAML
 set +e
 output_all="$(PATH="${BUILD_PATH}" bash "${SANDBOX}" -f "${tmpdir}/config.yaml" run 2>&1)"
@@ -738,20 +756,21 @@ rm -f "${PROJECT_ROOT}/.sandbox-dockerfile"
 tmpdir="$(mktemp -d)"
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 YAML
 set +e
 output_all="$(PATH="${BUILD_PATH}" bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
 exit_code=$?
 set -e
-assert_exit_code 0 "${exit_code}" "template with no SDKs exits code 0"
+assert_exit_code 0 "${exit_code}" "template with no optional SDKs exits code 0"
 
 dockerfile_content="$(cat "${PROJECT_ROOT}/.sandbox-dockerfile")"
-assert_not_contains "${dockerfile_content}" "nodejs" "no SDKs: no Node.js install"
-assert_not_contains "${dockerfile_content}" "python" "no SDKs: no Python install"
-assert_not_contains "${dockerfile_content}" "go.dev" "no SDKs: no Go install"
-assert_not_contains "${dockerfile_content}" "IF_" "no SDKs: no conditional tags remain"
-assert_contains "${dockerfile_content}" "tini" "no SDKs: base tooling (tini) remains"
-assert_contains "${dockerfile_content}" "ENTRYPOINT" "no SDKs: ENTRYPOINT remains"
+assert_not_contains "${dockerfile_content}" "python" "no optional SDKs: no Python install"
+assert_not_contains "${dockerfile_content}" "go.dev" "no optional SDKs: no Go install"
+assert_not_contains "${dockerfile_content}" "IF_" "no optional SDKs: no conditional tags remain"
+assert_contains "${dockerfile_content}" "tini" "no optional SDKs: base tooling (tini) remains"
+assert_contains "${dockerfile_content}" "ENTRYPOINT" "no optional SDKs: ENTRYPOINT remains"
 rm -rf "${tmpdir}"
 
 # ============================================================================
@@ -795,6 +814,8 @@ rm -f "${PROJECT_ROOT}/.sandbox-dockerfile"
 tmpdir="$(mktemp -d)"
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 packages:
   - build-essential
   - curl
@@ -820,6 +841,8 @@ rm -f "${PROJECT_ROOT}/.sandbox-dockerfile"
 tmpdir="$(mktemp -d)"
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 YAML
 set +e
 output_all="$(PATH="${BUILD_PATH}" bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
@@ -841,6 +864,8 @@ echo "# AC: process_template — mismatched tags error"
 tmpdir="$(mktemp -d)"
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 YAML
 # Create a broken template with unmatched opening tag
 orig_template="${PROJECT_ROOT}/Dockerfile.template"
@@ -873,6 +898,8 @@ echo "# AC: process_template — unresolved placeholder error"
 tmpdir="$(mktemp -d)"
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 YAML
 # Create a template with an unknown placeholder
 orig_template="${PROJECT_ROOT}/Dockerfile.template"
@@ -961,6 +988,8 @@ echo "# AC: compute_content_hash — deterministic and sensitive to changes"
 tmpdir="$(mktemp -d)"
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 YAML
 set +e
 output1="$(PATH="${BUILD_PATH}" bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
@@ -994,6 +1023,8 @@ rm -rf "${tmpdir}"
 tmpdir="$(mktemp -d)"
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 YAML
 set +e
 output1="$(PATH="${BUILD_PATH}" bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
@@ -1002,6 +1033,8 @@ tag1="$(echo "${output1}" | grep "image built:" | sed 's/.*image built: //')"
 # Now modify the config
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: gemini-cli
+sdks:
+  nodejs: "22"
 YAML
 set +e
 output2="$(PATH="${BUILD_PATH}" bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
@@ -1026,6 +1059,8 @@ cp "${PROJECT_ROOT}/templates/config.yaml" "${tmpdir}/templates/"
 # Deliberately do NOT copy scripts/git-wrapper.sh
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 YAML
 set +e
 output_all="$(PATH="${BUILD_PATH}" bash "${tmpdir}/sandbox.sh" build -f "${tmpdir}/config.yaml" 2>&1)"
@@ -1040,6 +1075,8 @@ rm -rf "${tmpdir}"
 tmpdir="$(mktemp -d)"
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 YAML
 set +e
 output_base="$(PATH="${BUILD_PATH}" bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
@@ -1076,6 +1113,8 @@ tmpdir="$(mktemp -d)"
 mkdir -p "${tmpdir}/myproject/.sandbox"
 cat > "${tmpdir}/myproject/.sandbox/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 YAML
 
 set +e
@@ -1106,6 +1145,8 @@ rm -rf "${tmpdir}"
 tmpdir="$(mktemp -d)"
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 YAML
 set +e
 output_all="$(PATH="${BUILD_PATH}" bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
@@ -1132,6 +1173,8 @@ mkdir -p "${tmpdir}/mockbin"
 setup_build_mock "${tmpdir}/mockbin" 0
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 YAML
 set +e
 output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
@@ -1163,6 +1206,8 @@ mkdir -p "${tmpdir}/mockbin"
 setup_build_mock "${tmpdir}/mockbin" 1
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 YAML
 set +e
 output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
@@ -1200,6 +1245,8 @@ mkdir -p "${tmpdir}/mockbin"
 setup_build_mock "${tmpdir}/mockbin" 0
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 YAML
 set +e
 output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
@@ -1219,6 +1266,8 @@ mkdir -p "${tmpdir}/mockbin"
 setup_build_mock "${tmpdir}/mockbin" 0
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 YAML
 set +e
 output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
@@ -1233,6 +1282,8 @@ mkdir -p "${tmpdir}/mockbin"
 setup_build_mock "${tmpdir}/mockbin" 0
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: gemini-cli
+sdks:
+  nodejs: "22"
 YAML
 set +e
 output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
@@ -1247,6 +1298,8 @@ mkdir -p "${tmpdir}/mockbin"
 setup_build_mock "${tmpdir}/mockbin" 1
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 YAML
 set +e
 output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
@@ -1275,6 +1328,8 @@ mkdir -p "${tmpdir}/mockbin"
 setup_build_mock "${tmpdir}/mockbin" 0
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 YAML
 set +e
 output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
@@ -1303,6 +1358,8 @@ mkdir -p "${tmpdir}/mockbin" "${tmpdir}/custom"
 setup_build_mock "${tmpdir}/mockbin" 0
 cat > "${tmpdir}/custom/config.yaml" <<'YAML'
 agent: gemini-cli
+sdks:
+  nodejs: "22"
 YAML
 set +e
 output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/custom/config.yaml" 2>&1)"
@@ -1319,6 +1376,8 @@ mkdir -p "${tmpdir}/mockbin"
 setup_build_mock "${tmpdir}/mockbin" 0
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 YAML
 set +e
 output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
@@ -1345,6 +1404,8 @@ mkdir -p "${tmpdir}/mockbin" "${tmpdir}/project/.sandbox"
 setup_build_mock "${tmpdir}/mockbin" 0
 cat > "${tmpdir}/project/.sandbox/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 mounts:
   - source: ".."
     target: "/workspace"
@@ -1364,6 +1425,8 @@ mkdir -p "${tmpdir}/mockbin" "${tmpdir}/myproject/subdir/.sandbox"
 setup_build_mock "${tmpdir}/mockbin" 0
 cat > "${tmpdir}/myproject/subdir/.sandbox/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 mounts:
   - source: ".."
     target: "/workspace"
@@ -1385,6 +1448,8 @@ mkdir -p "${tmpdir}/mockbin" "${tmpdir}/project" "${tmpdir}/shared"
 setup_build_mock "${tmpdir}/mockbin" 0
 cat > "${tmpdir}/config.yaml" <<YAML
 agent: claude-code
+sdks:
+  nodejs: "22"
 mounts:
   - source: "${tmpdir}/project"
     target: "/workspace"
@@ -1407,6 +1472,8 @@ mkdir -p "${tmpdir}/mockbin" "${tmpdir}/project"
 setup_build_mock "${tmpdir}/mockbin" 0
 cat > "${tmpdir}/config.yaml" <<YAML
 agent: claude-code
+sdks:
+  nodejs: "22"
 mounts:
   - source: "${tmpdir}/project"
     target: "/workspace"
@@ -1424,6 +1491,8 @@ mkdir -p "${tmpdir}/mockbin"
 setup_build_mock "${tmpdir}/mockbin" 0
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 YAML
 set +e
 output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
@@ -1441,6 +1510,8 @@ mkdir -p "${tmpdir}/mockbin" "${tmpdir}/abs-data"
 setup_build_mock "${tmpdir}/mockbin" 0
 cat > "${tmpdir}/config.yaml" <<YAML
 agent: claude-code
+sdks:
+  nodejs: "22"
 mounts:
   - source: "${tmpdir}/abs-data"
     target: "/data"
@@ -1484,6 +1555,8 @@ mkdir -p "${tmpdir}/mockbin" "${tmpdir}/workspace/.sandbox" "${tmpdir}/data"
 setup_build_mock "${tmpdir}/mockbin" 0
 cat > "${tmpdir}/workspace/.sandbox/config.yaml" <<YAML
 agent: claude-code
+sdks:
+  nodejs: "22"
 mounts:
   - source: ".."
     target: "/workspace"
@@ -1514,6 +1587,8 @@ mkdir -p "${tmpdir}/mockbin"
 setup_build_mock "${tmpdir}/mockbin" 0
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 secrets:
   - ANTHROPIC_API_KEY
 YAML
@@ -1531,6 +1606,8 @@ mkdir -p "${tmpdir}/mockbin"
 setup_build_mock "${tmpdir}/mockbin" 0
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 secrets:
   - ANTHROPIC_API_KEY
 YAML
@@ -1548,6 +1625,8 @@ mkdir -p "${tmpdir}/mockbin"
 setup_build_mock "${tmpdir}/mockbin" 0
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 secrets:
   - TEST_SECRET_ONE
   - TEST_SECRET_TWO
@@ -1565,6 +1644,8 @@ mkdir -p "${tmpdir}/mockbin"
 setup_build_mock "${tmpdir}/mockbin" 0
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 secrets:
   - MISSING_SECRET_X
   - TEST_SECRET_TWO
@@ -1583,6 +1664,8 @@ mkdir -p "${tmpdir}/mockbin"
 setup_build_mock "${tmpdir}/mockbin" 0
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 YAML
 set +e
 output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
@@ -1604,6 +1687,8 @@ mkdir -p "${tmpdir}/mockbin"
 setup_build_mock "${tmpdir}/mockbin" 0
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 secrets:
   - ANTHROPIC_API_KEY
 YAML
@@ -1622,6 +1707,8 @@ mkdir -p "${tmpdir}/mockbin"
 setup_build_mock "${tmpdir}/mockbin" 0
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 secrets:
   - TEST_SECRET_A
   - TEST_SECRET_B
@@ -1642,6 +1729,8 @@ mkdir -p "${tmpdir}/mockbin"
 setup_build_mock "${tmpdir}/mockbin" 0
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 YAML
 set +e
 output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
@@ -1664,6 +1753,8 @@ mkdir -p "${tmpdir}/mockbin"
 setup_build_mock "${tmpdir}/mockbin" 0
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 secrets:
   - MY_SECRET_KEY
 YAML
@@ -1688,6 +1779,8 @@ mkdir -p "${tmpdir}/mockbin"
 setup_build_mock "${tmpdir}/mockbin" 1
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 secrets:
   - BUILD_TEST_SECRET
 YAML
@@ -1707,6 +1800,8 @@ mkdir -p "${tmpdir}/mockbin"
 setup_build_mock "${tmpdir}/mockbin" 0
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 secrets:
   - RUNTIME_SECRET
 YAML
@@ -1735,6 +1830,8 @@ mkdir -p "${tmpdir}/mockbin"
 setup_build_mock "${tmpdir}/mockbin" 0
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 env:
   NODE_ENV: development
 YAML
@@ -1753,6 +1850,8 @@ mkdir -p "${tmpdir}/mockbin"
 setup_build_mock "${tmpdir}/mockbin" 0
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 env:
   NODE_ENV: development
   DEBUG: "true"
@@ -1773,6 +1872,8 @@ mkdir -p "${tmpdir}/mockbin"
 setup_build_mock "${tmpdir}/mockbin" 0
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 YAML
 set +e
 output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
@@ -1795,6 +1896,8 @@ mkdir -p "${tmpdir}/mockbin"
 setup_build_mock "${tmpdir}/mockbin" 0
 cat > "${tmpdir}/config.yaml" <<YAML
 agent: claude-code
+sdks:
+  nodejs: "22"
 env:
   MY_MESSAGE: hello world
 YAML
@@ -1813,6 +1916,8 @@ mkdir -p "${tmpdir}/mockbin" "${tmpdir}/project"
 setup_build_mock "${tmpdir}/mockbin" 0
 cat > "${tmpdir}/config.yaml" <<YAML
 agent: claude-code
+sdks:
+  nodejs: "22"
 secrets:
   - MY_SECRET
 env:
@@ -1845,6 +1950,8 @@ mkdir -p "${tmpdir}/mockbin" "${tmpdir}/src"
 setup_build_mock "${tmpdir}/mockbin" 0
 cat > "${tmpdir}/config.yaml" <<YAML
 agent: claude-code
+sdks:
+  nodejs: "22"
 secrets:
   - API_KEY
   - DB_PASSWORD
@@ -1879,6 +1986,8 @@ mkdir -p "${tmpdir}/mockbin" "${tmpdir}/my-project/_bmad-output" "${tmpdir}/my-p
 setup_build_mock "${tmpdir}/mockbin" 0
 cat > "${tmpdir}/config.yaml" <<YAML
 agent: claude-code
+sdks:
+  nodejs: "22"
 env:
   BMAD_PROJECT: my-project
 mounts:
@@ -1903,6 +2012,8 @@ mkdir -p "${tmpdir}/mockbin"
 setup_build_mock "${tmpdir}/mockbin" 0
 cat > "${tmpdir}/config.yaml" <<YAML
 agent: claude-code
+sdks:
+  nodejs: "22"
 secrets:
   - SECRET_TOKEN
 env:
@@ -1934,6 +2045,8 @@ mkdir -p "${tmpdir}/mockbin"
 setup_build_mock "${tmpdir}/mockbin" 0
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 env:
   INVALID-KEY: value
 YAML
@@ -1951,6 +2064,8 @@ mkdir -p "${tmpdir}/mockbin"
 setup_build_mock "${tmpdir}/mockbin" 0
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 env:
   FOO=BAR: value
 YAML
@@ -1967,6 +2082,8 @@ mkdir -p "${tmpdir}/mockbin"
 setup_build_mock "${tmpdir}/mockbin" 0
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 env:
   _PRIVATE: secret
   NODE_ENV_2: test
@@ -1987,6 +2104,8 @@ mkdir -p "${tmpdir}/mockbin"
 setup_build_mock "${tmpdir}/mockbin" 0
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 env:
   FOO:
 YAML
@@ -2006,6 +2125,8 @@ mkdir -p "${tmpdir}/mockbin"
 setup_build_mock "${tmpdir}/mockbin" 0
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 env: {}
 YAML
 set +e
@@ -2259,6 +2380,8 @@ mkdir -p "${tmpdir}/mockbin"
 setup_build_mock "${tmpdir}/mockbin" 0
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 YAML
 set +e
 output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
@@ -2277,6 +2400,8 @@ mkdir -p "${tmpdir}/mockbin" "${tmpdir}/project"
 setup_build_mock "${tmpdir}/mockbin" 0
 cat > "${tmpdir}/config.yaml" <<YAML
 agent: claude-code
+sdks:
+  nodejs: "22"
 mounts:
   - source: ${tmpdir}/project
     target: /workspace
@@ -2296,6 +2421,8 @@ mkdir -p "${tmpdir}/mockbin"
 setup_build_mock "${tmpdir}/mockbin" 0
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 secrets:
   - MY_SECRET
 env:
@@ -2540,6 +2667,8 @@ mkdir -p "${tmpdir}/mockbin"
 setup_build_mock "${tmpdir}/mockbin" 1
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 YAML
 set +e
 output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
@@ -2555,6 +2684,8 @@ mkdir -p "${tmpdir}/mockbin"
 setup_build_mock "${tmpdir}/mockbin" 0
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 YAML
 set +e
 output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
@@ -2589,6 +2720,8 @@ mkdir -p "${tmpdir}/mockbin"
 setup_build_mock "${tmpdir}/mockbin" 0
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 YAML
 set +e
 output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
@@ -2610,6 +2743,8 @@ mkdir -p "${tmpdir}/mockbin"
 setup_build_mock "${tmpdir}/mockbin" 0
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 YAML
 set +e
 output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
@@ -2625,6 +2760,8 @@ mkdir -p "${tmpdir}/mockbin"
 setup_build_mock "${tmpdir}/mockbin" 0
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 YAML
 set +e
 output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
@@ -2640,6 +2777,8 @@ mkdir -p "${tmpdir}/mockbin"
 setup_build_mock "${tmpdir}/mockbin" 0
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 YAML
 set +e
 output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
@@ -2660,6 +2799,8 @@ mkdir -p "${tmpdir}/mockbin"
 setup_build_mock "${tmpdir}/mockbin" 0
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 YAML
 set +e
 output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
@@ -2675,6 +2816,8 @@ mkdir -p "${tmpdir}/mockbin" "${tmpdir}/project"
 setup_build_mock "${tmpdir}/mockbin" 0
 cat > "${tmpdir}/config.yaml" <<YAML
 agent: claude-code
+sdks:
+  nodejs: "22"
 mounts:
   - source: ./project
     target: /workspace
@@ -2698,6 +2841,8 @@ mkdir -p "${tmpdir}/mockbin"
 setup_build_mock "${tmpdir}/mockbin" 0
 cat > "${tmpdir}/config.yaml" <<YAML
 agent: claude-code
+sdks:
+  nodejs: "22"
 secrets:
   - MY_SECRET
 env:
@@ -2729,6 +2874,8 @@ rm -f "${PROJECT_ROOT}/.sandbox-dockerfile"
 tmpdir="$(mktemp -d)"
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 YAML
 set +e
 output_all="$(PATH="${BUILD_PATH}" bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
@@ -2960,6 +3107,147 @@ exit_code=$?
 set -e
 assert_exit_code 1 "${exit_code}" "5.1: unknown MCP server fails with exit 1"
 assert_contains "${output_all}" "unknown mcp server" "5.1: error message mentions unknown mcp server"
+
+rm -rf "${tmpdir}"
+
+# ============================================================================
+# Story 4.4: Agent CLI Installation
+# ============================================================================
+
+echo "# Story 4.4: Agent CLI installation"
+
+# Test 4.4-1: claude-code agent with Node.js — Dockerfile contains npm install claude-code (AC #1)
+
+rm -f "${PROJECT_ROOT}/.sandbox-dockerfile"
+tmpdir="$(mktemp -d)"
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+sdks:
+  nodejs: "22"
+YAML
+set +e
+output_all="$(PATH="${BUILD_PATH}" bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "4.4: build with agent claude-code exits code 0"
+
+dockerfile_content="$(cat "${PROJECT_ROOT}/.sandbox-dockerfile")"
+
+assert_contains "${dockerfile_content}" "npm install -g @anthropic-ai/claude-code" "4.4: Dockerfile installs @anthropic-ai/claude-code"
+assert_not_contains "${dockerfile_content}" "@google/gemini-cli" "4.4: Dockerfile does not contain gemini-cli when agent is claude-code"
+assert_not_contains "${dockerfile_content}" "IF_AGENT_CLAUDE" "4.4: no IF_AGENT_CLAUDE tags remain"
+assert_not_contains "${dockerfile_content}" "IF_AGENT_GEMINI" "4.4: no IF_AGENT_GEMINI tags remain"
+
+rm -rf "${tmpdir}"
+
+# Test 4.4-2: gemini-cli agent with Node.js — Dockerfile contains npm install gemini-cli (AC #2)
+
+rm -f "${PROJECT_ROOT}/.sandbox-dockerfile"
+tmpdir="$(mktemp -d)"
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: gemini-cli
+sdks:
+  nodejs: "22"
+YAML
+set +e
+output_all="$(PATH="${BUILD_PATH}" bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "4.4: build with agent gemini-cli exits code 0"
+
+dockerfile_content="$(cat "${PROJECT_ROOT}/.sandbox-dockerfile")"
+
+assert_contains "${dockerfile_content}" "npm install -g @google/gemini-cli" "4.4: Dockerfile installs @google/gemini-cli"
+assert_not_contains "${dockerfile_content}" "@anthropic-ai/claude-code" "4.4: Dockerfile does not contain claude-code when agent is gemini-cli"
+
+rm -rf "${tmpdir}"
+
+# Test 4.4-3: claude-code without Node.js — build fails with clear error (AC #3)
+
+rm -f "${PROJECT_ROOT}/.sandbox-dockerfile"
+tmpdir="$(mktemp -d)"
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+YAML
+set +e
+output_all="$(PATH="${BUILD_PATH}" bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 1 "${exit_code}" "4.4: claude-code without nodejs fails with exit 1"
+assert_contains "${output_all}" "requires sdks.nodejs" "4.4: error message mentions sdks.nodejs requirement for claude-code"
+
+rm -rf "${tmpdir}"
+
+# Test 4.4-4: gemini-cli without Node.js — build fails with clear error (AC #3)
+
+rm -f "${PROJECT_ROOT}/.sandbox-dockerfile"
+tmpdir="$(mktemp -d)"
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: gemini-cli
+YAML
+set +e
+output_all="$(PATH="${BUILD_PATH}" bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 1 "${exit_code}" "4.4: gemini-cli without nodejs fails with exit 1"
+assert_contains "${output_all}" "requires sdks.nodejs" "4.4: error message mentions sdks.nodejs requirement for gemini-cli"
+
+rm -rf "${tmpdir}"
+
+# Test 4.4-5: Agent installation block appears after SDK blocks but before isolation scripts (AC #5)
+
+rm -f "${PROJECT_ROOT}/.sandbox-dockerfile"
+tmpdir="$(mktemp -d)"
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+sdks:
+  nodejs: "22"
+YAML
+set +e
+output_all="$(PATH="${BUILD_PATH}" bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+
+dockerfile_content="$(cat "${PROJECT_ROOT}/.sandbox-dockerfile")"
+
+agent_line="$(echo "${dockerfile_content}" | grep -n "npm install -g @anthropic-ai/claude-code" | head -1 | cut -d: -f1)"
+node_line="$(echo "${dockerfile_content}" | grep -n "nodesource" | head -1 | cut -d: -f1)"
+copy_line="$(echo "${dockerfile_content}" | grep -n "COPY scripts/entrypoint.sh" | head -1 | cut -d: -f1)"
+
+if [[ -n "${agent_line}" && -n "${node_line}" && "${agent_line}" -gt "${node_line}" ]]; then
+  pass "4.4: agent install appears after Node.js SDK block"
+else
+  fail "4.4: agent install appears after Node.js SDK block" "agent_line=${agent_line} node_line=${node_line}"
+fi
+
+if [[ -n "${agent_line}" && -n "${copy_line}" && "${agent_line}" -lt "${copy_line}" ]]; then
+  pass "4.4: agent install appears before isolation scripts COPY"
+else
+  fail "4.4: agent install appears before isolation scripts COPY" "agent_line=${agent_line} copy_line=${copy_line}"
+fi
+
+rm -rf "${tmpdir}"
+
+# Test 4.4-6: No cross-contamination — selecting one agent excludes the other
+# (parse_config rejects unknown agents, so "no agent selected" is unreachable;
+#  this test verifies only the selected agent's install appears)
+
+rm -f "${PROJECT_ROOT}/.sandbox-dockerfile"
+tmpdir="$(mktemp -d)"
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+sdks:
+  nodejs: "22"
+YAML
+set +e
+output_all="$(PATH="${BUILD_PATH}" bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+
+dockerfile_content="$(cat "${PROJECT_ROOT}/.sandbox-dockerfile")"
+
+# Verify only the selected agent appears — claude-code selected, gemini should not appear
+assert_not_contains "${dockerfile_content}" "gemini-cli" "4.4: no gemini-cli install when claude-code selected"
 
 rm -rf "${tmpdir}"
 

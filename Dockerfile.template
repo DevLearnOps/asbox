@@ -63,6 +63,14 @@ RUN curl -fsSL https://go.dev/dl/go{{GO_VERSION}}.linux-amd64.tar.gz | tar -C /u
 ENV PATH="/usr/local/go/bin:${PATH}"
 # {{/IF_GO}}
 
+# {{IF_AGENT_CLAUDE}}
+RUN npm install -g @anthropic-ai/claude-code
+# {{/IF_AGENT_CLAUDE}}
+
+# {{IF_AGENT_GEMINI}}
+RUN npm install -g @google/gemini-cli
+# {{/IF_AGENT_GEMINI}}
+
 # {{IF_MCP_PLAYWRIGHT}}
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers
 RUN npm install -g @playwright/mcp@{{MCP_PLAYWRIGHT_VERSION}} && npx playwright install --with-deps chromium

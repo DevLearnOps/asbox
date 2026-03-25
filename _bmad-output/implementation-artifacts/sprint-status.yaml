@@ -74,7 +74,7 @@ development_status:
   4-1-podman-installation-and-docker-alias: done
   4-2-building-and-running-inner-containers: done
   4-3-isolation-scripts-baked-into-image: done
-  4-4-agent-cli-installation: ready-for-dev
+  4-4-agent-cli-installation: review
   epic-4-retrospective: optional
 
   # Epic 5: MCP Integration -- Agent Can Run Browser Tests via Playwright

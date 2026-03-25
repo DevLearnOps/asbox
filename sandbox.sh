@@ -321,6 +321,20 @@ process_template() {
     template="$(echo "${template}" | sed '/^# {{IF_MCP_PLAYWRIGHT}}$/,/^# {{\/IF_MCP_PLAYWRIGHT}}$/d')"
   fi
 
+  # IF_AGENT_CLAUDE
+  if [[ "${CFG_AGENT}" == "claude-code" ]]; then
+    template="$(echo "${template}" | sed '/^# {{IF_AGENT_CLAUDE}}$/d; /^# {{\/IF_AGENT_CLAUDE}}$/d')"
+  else
+    template="$(echo "${template}" | sed '/^# {{IF_AGENT_CLAUDE}}$/,/^# {{\/IF_AGENT_CLAUDE}}$/d')"
+  fi
+
+  # IF_AGENT_GEMINI
+  if [[ "${CFG_AGENT}" == "gemini-cli" ]]; then
+    template="$(echo "${template}" | sed '/^# {{IF_AGENT_GEMINI}}$/d; /^# {{\/IF_AGENT_GEMINI}}$/d')"
+  else
+    template="$(echo "${template}" | sed '/^# {{IF_AGENT_GEMINI}}$/,/^# {{\/IF_AGENT_GEMINI}}$/d')"
+  fi
+
   # Step 3: Substitute value placeholders
   local safe_val
 
@@ -398,6 +412,15 @@ cmd_build() {
       die "mcp server 'playwright' requires sdks.nodejs to be configured" 1
     fi
   done
+
+  # Validate agent CLI dependencies
+  if [[ -n "${CFG_AGENT}" && "${CFG_AGENT}" != "none" ]]; then
+    if [[ "${CFG_AGENT}" == "claude-code" || "${CFG_AGENT}" == "gemini-cli" ]]; then
+      if [[ -z "${CFG_SDK_NODEJS}" ]]; then
+        die "agent ${CFG_AGENT} requires sdks.nodejs to be configured" 1
+      fi
+    fi
+  fi
 
   process_template
 
