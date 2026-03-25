@@ -30,7 +30,12 @@ mounts:
 #   - ANTHROPIC_API_KEY
 
 # Non-secret environment variables
-# env:
+# Git identity for commits inside the sandbox (avoids "Author identity unknown")
+env:
+  GIT_AUTHOR_NAME: "Sandbox User"
+  GIT_AUTHOR_EMAIL: "sandbox@localhost"
+  GIT_COMMITTER_NAME: "Sandbox User"
+  GIT_COMMITTER_EMAIL: "sandbox@localhost"
 #   NODE_ENV: development
 
 # MCP servers to pre-install
