@@ -65,7 +65,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # {{/IF_PYTHON}}
 
 # {{IF_GO}}
-RUN curl -fsSL https://go.dev/dl/go{{GO_VERSION}}.linux-amd64.tar.gz | tar -C /usr/local -xzf -
+RUN ARCH="$(dpkg --print-architecture)" && \
+    curl -fsSL "https://go.dev/dl/go{{GO_VERSION}}.linux-${ARCH}.tar.gz" | tar -C /usr/local -xzf -
 ENV PATH="/usr/local/go/bin:${PATH}"
 # {{/IF_GO}}
 
