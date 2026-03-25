@@ -23,6 +23,33 @@ if command -v podman >/dev/null 2>&1; then
   podman info >/dev/null 2>&1 || echo "warning: podman info failed" >&2
 fi
 
+# Generate .mcp.json from build-time manifest
+MCP_MANIFEST="/etc/sandbox/mcp-servers.json"
+if [[ -f "${MCP_MANIFEST}" ]]; then
+  server_count="$(jq '.mcpServers | length' "${MCP_MANIFEST}" 2>/dev/null || echo 0)"
+  if [[ "${server_count}" -gt 0 ]]; then
+    if [[ -f ".mcp.json" ]]; then
+      # Merge: project config takes precedence on name conflicts
+      tmp_file="$(mktemp)"
+      cp ".mcp.json" "${tmp_file}"
+      jq -r '.mcpServers | keys[]' "${MCP_MANIFEST}" | while IFS= read -r server_name; do
+        if jq -e --arg name "${server_name}" '.mcpServers[$name]' "${tmp_file}" >/dev/null 2>&1; then
+          echo "sandbox: skipping ${server_name} (project override exists)"
+        else
+          jq --arg name "${server_name}" \
+            --argjson config "$(jq --arg name "${server_name}" '.mcpServers[$name]' "${MCP_MANIFEST}")" \
+            '.mcpServers[$name] = $config' "${tmp_file}" > "${tmp_file}.new" && mv "${tmp_file}.new" "${tmp_file}"
+          echo "sandbox: added ${server_name} to .mcp.json"
+        fi
+      done
+      mv "${tmp_file}" ".mcp.json"
+    else
+      cp "${MCP_MANIFEST}" ".mcp.json"
+      echo "sandbox: generated .mcp.json with $(jq -r '.mcpServers | keys | join(", ")' "${MCP_MANIFEST}") servers"
+    fi
+  fi
+fi
+
 if [[ -z "${SANDBOX_AGENT:-}" ]]; then
   echo "error: SANDBOX_AGENT not set" >&2
   exit 1

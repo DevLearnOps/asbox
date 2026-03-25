@@ -3111,6 +3111,57 @@ assert_contains "${output_all}" "unknown mcp server" "5.1: error message mention
 rm -rf "${tmpdir}"
 
 # ============================================================================
+# Story 5.2: MCP Configuration Generation and Merge
+# ============================================================================
+
+echo "# Story 5.2: MCP configuration generation and merge"
+
+# Task 1: jq is in Dockerfile common tools (AC #1, #2)
+
+rm -f "${PROJECT_ROOT}/.sandbox-dockerfile"
+tmpdir="$(mktemp -d)"
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+sdks:
+  nodejs: "22"
+mcp:
+  - playwright
+YAML
+set +e
+output_all="$(PATH="${BUILD_PATH}" bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "5.2: build with mcp playwright exits code 0"
+
+dockerfile_content="$(cat "${PROJECT_ROOT}/.sandbox-dockerfile")"
+
+# Test 5.2-1.1: jq appears in common CLI tools installation
+assert_contains "${dockerfile_content}" "jq" "5.2: Dockerfile installs jq in common CLI tools"
+
+rm -rf "${tmpdir}"
+
+# Task 2-3: entrypoint.sh contains MCP configuration logic (AC #1, #2, #3)
+
+entrypoint_content="$(cat "${PROJECT_ROOT}/scripts/entrypoint.sh")"
+
+# Test 5.2-2.1: entrypoint reads MCP manifest
+assert_contains "${entrypoint_content}" "mcp-servers.json" "5.2: entrypoint reads MCP manifest"
+
+# Test 5.2-2.2: entrypoint writes .mcp.json
+assert_contains "${entrypoint_content}" ".mcp.json" "5.2: entrypoint writes .mcp.json"
+
+# Test 5.2-3.1: entrypoint contains merge/conflict logic
+assert_contains "${entrypoint_content}" "skipping" "5.2: entrypoint has conflict skip logic"
+assert_contains "${entrypoint_content}" "project override" "5.2: entrypoint logs project override on conflict"
+
+# Test 5.2-3.2: entrypoint logs server additions
+assert_contains "${entrypoint_content}" "added" "5.2: entrypoint logs added servers"
+
+# Test 5.2-4.1: Dockerfile template generates valid entrypoint with MCP logic
+# Verify that a build with MCP produces a Dockerfile that COPYs the entrypoint containing MCP logic
+assert_contains "${dockerfile_content}" "entrypoint.sh" "5.2: Dockerfile COPYs entrypoint with MCP logic"
+
+# ============================================================================
 # Story 4.4: Agent CLI Installation
 # ============================================================================
 
