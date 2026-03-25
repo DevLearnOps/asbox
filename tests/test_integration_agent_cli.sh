@@ -74,29 +74,27 @@ else
 fi
 
 # ============================================================================
-# Test 3: claude is installed globally via npm (AC #1 — installed via npm install -g)
+# Test 3: claude is NOT installed via npm (migration regression guard)
 # ============================================================================
 
-echo "# Test 3: claude installed via npm global"
+echo "# Test 3: claude is not in npm global packages"
 output="$(run_in_sandbox "npm list -g @anthropic-ai/claude-code 2>&1")" || true
 if echo "${output}" | grep -q "@anthropic-ai/claude-code"; then
-  pass "claude-code is in npm global packages"
+  fail "claude-code still in npm global packages (migration regression)" "found npm package"
 else
-  fail "claude-code is in npm global packages" "$(echo "${output}" | tail -5)"
+  pass "claude-code is NOT in npm global packages (installed via official script)"
 fi
 
 # ============================================================================
-# Test 4: no version pinning — installed version is latest (AC #4)
+# Test 4: claude binary is at ~/.local/bin/claude (installed via official script)
 # ============================================================================
 
-echo "# Test 4: no pinned version (informational)"
-output="$(run_in_sandbox "npm list -g @anthropic-ai/claude-code 2>/dev/null")" || true
-version="$(echo "${output}" | grep -o '@anthropic-ai/claude-code@[^ ]*' || true)"
-if [[ -n "${version}" ]]; then
-  echo "# Installed: ${version}"
-  pass "version info printed (manual verification)"
+echo "# Test 4: claude binary accessible at ~/.local/bin/claude"
+output="$(run_in_sandbox "test -x ~/.local/bin/claude && echo EXISTS_AND_EXECUTABLE 2>&1")" || true
+if echo "${output}" | grep -q "EXISTS_AND_EXECUTABLE"; then
+  pass "claude binary is at ~/.local/bin/claude (native install)"
 else
-  fail "version info printed (manual verification)" "npm list returned no version"
+  fail "claude binary is at ~/.local/bin/claude (native install)" "$(echo "${output}" | tail -5)"
 fi
 
 # ============================================================================

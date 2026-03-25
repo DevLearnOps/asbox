@@ -1,5 +1,5 @@
 # generated: 2026-03-24
-# last_updated: 2026-03-25
+# last_updated: 2026-03-25 (updated by create-story)
 # project: sandbox
 # project_key: NOKEY
 # tracking_system: file-system
@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-03-24
-last_updated: 2026-03-25
+last_updated: 2026-03-25 (dev-story)
 project: sandbox
 
 
@@ -92,6 +92,6 @@ development_status:
   epic-7: in-progress
   7-1-fix-playwright-system-dependencies: done
   7-2-fix-docker-compose-plugin-registration: done
-  7-3-migrate-claude-cli-to-official-install-script: backlog
+  7-3-migrate-claude-cli-to-official-install-script: done
   7-4-investigate-fix-host-agent-config-mount: done
   epic-7-retrospective: optional

@@ -423,7 +423,7 @@ cmd_build() {
 
   # Validate agent CLI dependencies
   if [[ -n "${CFG_AGENT}" && "${CFG_AGENT}" != "none" ]]; then
-    if [[ "${CFG_AGENT}" == "claude-code" || "${CFG_AGENT}" == "gemini-cli" ]]; then
+    if [[ "${CFG_AGENT}" == "gemini-cli" ]]; then
       if [[ -z "${CFG_SDK_NODEJS}" ]]; then
         die "agent ${CFG_AGENT} requires sdks.nodejs to be configured" 1
       fi

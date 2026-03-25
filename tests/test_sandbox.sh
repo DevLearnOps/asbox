@@ -2972,11 +2972,13 @@ else
   fail "4.3: scripts COPY'd before sandbox user created (root ownership preserved)" "copy_line=${copy_line} user_line=${user_line}"
 fi
 
-# Test 4.3-2.2: No USER directive in Dockerfile (container starts as root, entrypoint drops privileges)
-if echo "${dockerfile_content}" | grep -q "^USER "; then
-  fail "4.3: no USER directive in generated Dockerfile (privilege drop via runuser in entrypoint)"
+# Test 4.3-2.2: Final USER context is root (container starts as root, entrypoint drops privileges)
+# Note: USER sandbox/USER root bracketing is allowed for agent install steps
+last_user="$(echo "${dockerfile_content}" | grep "^USER " | tail -1 | awk '{print $2}')"
+if [[ -z "${last_user}" || "${last_user}" == "root" ]]; then
+  pass "4.3: final USER context is root (privilege drop via runuser in entrypoint)"
 else
-  pass "4.3: no USER directive in generated Dockerfile (privilege drop via runuser in entrypoint)"
+  fail "4.3: final USER context is root (privilege drop via runuser in entrypoint)" "last USER directive: ${last_user}"
 fi
 
 # Test 4.3-2.3: No chown targeting isolation script paths
@@ -3179,7 +3181,7 @@ assert_contains "${dockerfile_content}" "entrypoint.sh" "5.2: Dockerfile COPYs e
 
 echo "# Story 4.4: Agent CLI installation"
 
-# Test 4.4-1: claude-code agent with Node.js — Dockerfile contains npm install claude-code (AC #1)
+# Test 4.4-1: claude-code agent with Node.js — Dockerfile uses official install script (AC #1)
 
 rm -f "${PROJECT_ROOT}/.sandbox-dockerfile"
 tmpdir="$(mktemp -d)"
@@ -3196,7 +3198,9 @@ assert_exit_code 0 "${exit_code}" "4.4: build with agent claude-code exits code 
 
 dockerfile_content="$(cat "${PROJECT_ROOT}/.sandbox-dockerfile")"
 
-assert_contains "${dockerfile_content}" "npm install -g @anthropic-ai/claude-code" "4.4: Dockerfile installs @anthropic-ai/claude-code"
+assert_contains "${dockerfile_content}" "claude.ai/install.sh" "4.4: Dockerfile uses official Claude install script"
+assert_contains "${dockerfile_content}" "USER sandbox" "4.4: Dockerfile switches to sandbox user for Claude install"
+assert_not_contains "${dockerfile_content}" "npm install -g @anthropic-ai/claude-code" "4.4: Dockerfile does NOT use npm install for claude-code (regression guard)"
 assert_not_contains "${dockerfile_content}" "@google/gemini-cli" "4.4: Dockerfile does not contain gemini-cli when agent is claude-code"
 assert_not_contains "${dockerfile_content}" "IF_AGENT_CLAUDE" "4.4: no IF_AGENT_CLAUDE tags remain"
 assert_not_contains "${dockerfile_content}" "IF_AGENT_GEMINI" "4.4: no IF_AGENT_GEMINI tags remain"
@@ -3221,11 +3225,11 @@ assert_exit_code 0 "${exit_code}" "4.4: build with agent gemini-cli exits code 0
 dockerfile_content="$(cat "${PROJECT_ROOT}/.sandbox-dockerfile")"
 
 assert_contains "${dockerfile_content}" "npm install -g @google/gemini-cli" "4.4: Dockerfile installs @google/gemini-cli"
-assert_not_contains "${dockerfile_content}" "@anthropic-ai/claude-code" "4.4: Dockerfile does not contain claude-code when agent is gemini-cli"
+assert_not_contains "${dockerfile_content}" "claude.ai/install.sh" "4.4: Dockerfile does not contain claude install when agent is gemini-cli"
 
 rm -rf "${tmpdir}"
 
-# Test 4.4-3: claude-code without Node.js — build fails with clear error (AC #3)
+# Test 4.4-3: claude-code without Node.js — build succeeds (official installer is standalone)
 
 rm -f "${PROJECT_ROOT}/.sandbox-dockerfile"
 tmpdir="$(mktemp -d)"
@@ -3236,8 +3240,11 @@ set +e
 output_all="$(PATH="${BUILD_PATH}" bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
 exit_code=$?
 set -e
-assert_exit_code 1 "${exit_code}" "4.4: claude-code without nodejs fails with exit 1"
-assert_contains "${output_all}" "requires sdks.nodejs" "4.4: error message mentions sdks.nodejs requirement for claude-code"
+assert_exit_code 0 "${exit_code}" "4.4: claude-code without nodejs succeeds (standalone installer)"
+
+dockerfile_content="$(cat "${PROJECT_ROOT}/.sandbox-dockerfile")"
+assert_contains "${dockerfile_content}" "claude.ai/install.sh" "4.4: Dockerfile uses official install script without Node.js"
+assert_not_contains "${dockerfile_content}" "nodesource" "4.4: Dockerfile does not install Node.js when not configured"
 
 rm -rf "${tmpdir}"
 
@@ -3273,20 +3280,20 @@ set -e
 
 dockerfile_content="$(cat "${PROJECT_ROOT}/.sandbox-dockerfile")"
 
-agent_line="$(echo "${dockerfile_content}" | grep -n "npm install -g @anthropic-ai/claude-code" | head -1 | cut -d: -f1)"
-node_line="$(echo "${dockerfile_content}" | grep -n "nodesource" | head -1 | cut -d: -f1)"
-copy_line="$(echo "${dockerfile_content}" | grep -n "COPY scripts/entrypoint.sh" | head -1 | cut -d: -f1)"
+agent_line="$(echo "${dockerfile_content}" | grep -n "claude.ai/install.sh" | head -1 | cut -d: -f1)"
+useradd_line="$(echo "${dockerfile_content}" | grep -n "useradd.*sandbox" | head -1 | cut -d: -f1)"
 
-if [[ -n "${agent_line}" && -n "${node_line}" && "${agent_line}" -gt "${node_line}" ]]; then
-  pass "4.4: agent install appears after Node.js SDK block"
+if [[ -n "${agent_line}" && -n "${useradd_line}" && "${agent_line}" -gt "${useradd_line}" ]]; then
+  pass "4.4: claude install appears after sandbox user creation"
 else
-  fail "4.4: agent install appears after Node.js SDK block" "agent_line=${agent_line} node_line=${node_line}"
+  fail "4.4: claude install appears after sandbox user creation" "agent_line=${agent_line} useradd_line=${useradd_line}"
 fi
 
-if [[ -n "${agent_line}" && -n "${copy_line}" && "${agent_line}" -lt "${copy_line}" ]]; then
-  pass "4.4: agent install appears before isolation scripts COPY"
+user_sandbox_line="$(echo "${dockerfile_content}" | grep -n "^USER sandbox" | head -1 | cut -d: -f1)"
+if [[ -n "${agent_line}" && -n "${user_sandbox_line}" && "${agent_line}" -gt "${user_sandbox_line}" ]]; then
+  pass "4.4: claude install runs as sandbox user"
 else
-  fail "4.4: agent install appears before isolation scripts COPY" "agent_line=${agent_line} copy_line=${copy_line}"
+  fail "4.4: claude install runs as sandbox user" "agent_line=${agent_line} user_sandbox_line=${user_sandbox_line}"
 fi
 
 rm -rf "${tmpdir}"
