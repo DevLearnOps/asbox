@@ -24,7 +24,7 @@ RUN curl -fsSL "https://download.opensuse.org/repositories/devel:kubic:libcontai
       https://download.opensuse.org/repositories/devel:kubic:libcontainers:unstable/xUbuntu_{{UBUNTU_VERSION}}/ /" \
       > /etc/apt/sources.list.d/podman-kubic.list && \
     apt-get update && \
-    apt-get install -y --no-install-recommends podman podman-docker uidmap fuse-overlayfs slirp4netns && \
+    apt-get install -y --no-install-recommends podman podman-docker uidmap fuse-overlayfs slirp4netns netavark aardvark-dns iptables && \
     rm -rf /var/lib/apt/lists/*
 
 # Suppress "Emulate Docker CLI" warnings
@@ -34,8 +34,9 @@ RUN touch /etc/containers/nodocker
 # - storage driver "vfs": compatible with all kernels (fuse-overlayfs fails on LinuxKit/Docker Desktop)
 # - Clear default_sysctls: prevents crun from writing to /proc/sys (read-only in Docker)
 # - events_logger "file": avoids journald dependency in containers
+# - network_backend "netavark": enables aardvark-dns for service-name resolution in compose networks
 RUN printf '[storage]\ndriver = "vfs"\n' > /etc/containers/storage.conf && \
-    printf '[containers]\ndefault_sysctls = []\n\n[engine]\nevents_logger = "file"\n' \
+    printf '[containers]\ndefault_sysctls = []\n\n[engine]\nevents_logger = "file"\n\n[network]\nnetwork_backend = "netavark"\n' \
       > /etc/containers/containers.conf
 
 # Docker Compose v2 standalone binary (provides service-name DNS via Netavark bridge networking)
@@ -43,6 +44,10 @@ RUN ARCH="$(uname -m)" && \
     curl -fsSL "https://github.com/docker/compose/releases/download/v2.35.1/docker-compose-linux-${ARCH}" \
       -o /usr/local/bin/docker-compose && \
     chmod +x /usr/local/bin/docker-compose
+
+# Register Docker Compose as a CLI plugin (enables `docker compose` subcommand via podman-docker)
+RUN mkdir -p /usr/local/lib/docker/cli-plugins && \
+    ln -sf /usr/local/bin/docker-compose /usr/local/lib/docker/cli-plugins/docker-compose
 
 # System packages from config
 RUN apt-get update && apt-get install -y --no-install-recommends {{PACKAGES}} && rm -rf /var/lib/apt/lists/*
@@ -74,13 +79,6 @@ RUN npm install -g @google/gemini-cli
 
 # {{IF_MCP_PLAYWRIGHT}}
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers
-# Chromium system deps — t64 suffixes are Ubuntu 24.04-specific (Noble time_t migration)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libnspr4 libnss3 libatk1.0-0t64 libatk-bridge2.0-0t64 \
-    libdbus-1-3 libcups2t64 libxcb1 libxkbcommon0 libatspi2.0-0t64 \
-    libx11-6 libxcomposite1 libxdamage1 libxext6 libxfixes3 libxrandr2 \
-    libgbm1 libcairo2 libpango-1.0-0 libasound2t64 \
-    && rm -rf /var/lib/apt/lists/*
 RUN npm install -g @playwright/mcp@{{MCP_PLAYWRIGHT_VERSION}} && npx playwright install --with-deps chromium
 # {{/IF_MCP_PLAYWRIGHT}}
 

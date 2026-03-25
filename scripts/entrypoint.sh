@@ -25,6 +25,12 @@ if [[ "$(id -u)" == "0" ]]; then
     fi
   fi
 
+  # Ensure XDG_RUNTIME_DIR exists for the sandbox user (must run as root since /run/user is root-owned)
+  runtime_dir="/run/user/$(id -u sandbox)"
+  mkdir -p "${runtime_dir}"
+  chown sandbox:sandbox "${runtime_dir}"
+  chmod 700 "${runtime_dir}"
+
   # Re-exec this script as the sandbox user
   exec runuser -u sandbox -- "$0" "$@"
 fi
@@ -35,6 +41,23 @@ if command -v podman >/dev/null 2>&1; then
   mkdir -p "${XDG_RUNTIME_DIR}" 2>/dev/null || true
   podman system migrate 2>/dev/null || true
   podman info >/dev/null 2>&1 || echo "warning: podman info failed" >&2
+
+  # Start Podman API socket (required for Docker Compose v2 to communicate with Podman)
+  mkdir -p "${XDG_RUNTIME_DIR}/podman" 2>/dev/null || true
+  podman system service --time=0 "unix://${XDG_RUNTIME_DIR}/podman/podman.sock" &
+
+  # Expose the Podman socket as DOCKER_HOST so docker-compose (standalone) can find it.
+  # Also create docker.sock symlink (systemd-tmpfiles would do this but there's no systemd).
+  export DOCKER_HOST="unix://${XDG_RUNTIME_DIR}/podman/podman.sock"
+  ln -sf "${XDG_RUNTIME_DIR}/podman/podman.sock" "${XDG_RUNTIME_DIR}/docker.sock" 2>/dev/null || true
+
+  # Wait briefly for the socket to become available
+  for _ in 1 2 3 4 5; do
+    if podman info >/dev/null 2>&1; then
+      break
+    fi
+    sleep 0.5
+  done
 fi
 
 # Generate .mcp.json from build-time manifest

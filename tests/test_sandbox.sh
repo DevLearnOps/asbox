@@ -227,8 +227,9 @@ fi
 echo "# Additional: command stubs and error handling"
 
 # run command requires config (no stub anymore)
+# Run from a temp dir to avoid picking up .sandbox/config.yaml from the project root
 set +e
-output_all="$(bash "${SANDBOX}" run 2>&1)"
+output_all="$(cd "$(mktemp -d)" && bash "${SANDBOX}" run 2>&1)"
 exit_code=$?
 set -e
 assert_exit_code 1 "${exit_code}" "'run' without config exits with code 1"
@@ -2261,6 +2262,10 @@ fi
 # When podman is available, entrypoint should verify it works
 assert_contains "${entrypoint_content}" "podman info" "entrypoint verifies podman info succeeds"
 
+# Test: entrypoint.sh starts Podman API socket for Docker Compose (story 7-2)
+assert_contains "${entrypoint_content}" "podman system service" "entrypoint starts Podman API socket service"
+assert_contains "${entrypoint_content}" "podman/podman.sock" "entrypoint configures podman socket path"
+
 # Test: entrypoint.sh Podman init works with mock podman binary
 tmpdir="$(mktemp -d)"
 mock_agent_dir="$(mktemp -d)"
@@ -2925,6 +2930,13 @@ assert_contains "${dockerfile_content}" 'driver = "vfs"' "podman: VFS storage dr
 
 # Test: default_sysctls cleared for Docker nested operation
 assert_contains "${dockerfile_content}" "default_sysctls = []" "podman: default sysctls cleared for Docker compatibility"
+
+# Test (7-2): Netavark and aardvark-dns installed for compose service-name DNS
+assert_contains "${dockerfile_content}" "netavark" "podman: generated Dockerfile installs netavark network backend"
+assert_contains "${dockerfile_content}" "aardvark-dns" "podman: generated Dockerfile installs aardvark-dns for service-name resolution"
+
+# Test (7-2): Netavark configured as network backend in containers.conf
+assert_contains "${dockerfile_content}" 'network_backend = "netavark"' "podman: Netavark configured as network backend"
 
 # ============================================================================
 # Story 4.3: Isolation Scripts Baked into Image
@@ -3593,35 +3605,8 @@ assert_exit_code 0 "${exit_code}" "7.1: build with mcp playwright exits code 0"
 
 dockerfile_content="$(cat "${PROJECT_ROOT}/.sandbox-dockerfile")"
 
-# Test 7.1-1: Dockerfile contains Playwright system dependency packages (AC #2)
-assert_contains "${dockerfile_content}" "libnspr4" "7.1: Dockerfile contains libnspr4"
-assert_contains "${dockerfile_content}" "libnss3" "7.1: Dockerfile contains libnss3"
-assert_contains "${dockerfile_content}" "libatk1.0-0t64" "7.1: Dockerfile contains libatk1.0-0t64"
-assert_contains "${dockerfile_content}" "libatk-bridge2.0-0t64" "7.1: Dockerfile contains libatk-bridge2.0-0t64"
-assert_contains "${dockerfile_content}" "libdbus-1-3" "7.1: Dockerfile contains libdbus-1-3"
-assert_contains "${dockerfile_content}" "libcups2t64" "7.1: Dockerfile contains libcups2t64"
-assert_contains "${dockerfile_content}" "libxcb1" "7.1: Dockerfile contains libxcb1"
-assert_contains "${dockerfile_content}" "libxkbcommon0" "7.1: Dockerfile contains libxkbcommon0"
-assert_contains "${dockerfile_content}" "libatspi2.0-0t64" "7.1: Dockerfile contains libatspi2.0-0t64"
-assert_contains "${dockerfile_content}" "libx11-6" "7.1: Dockerfile contains libx11-6"
-assert_contains "${dockerfile_content}" "libxcomposite1" "7.1: Dockerfile contains libxcomposite1"
-assert_contains "${dockerfile_content}" "libxdamage1" "7.1: Dockerfile contains libxdamage1"
-assert_contains "${dockerfile_content}" "libxext6" "7.1: Dockerfile contains libxext6"
-assert_contains "${dockerfile_content}" "libxfixes3" "7.1: Dockerfile contains libxfixes3"
-assert_contains "${dockerfile_content}" "libxrandr2" "7.1: Dockerfile contains libxrandr2"
-assert_contains "${dockerfile_content}" "libgbm1" "7.1: Dockerfile contains libgbm1"
-assert_contains "${dockerfile_content}" "libcairo2" "7.1: Dockerfile contains libcairo2"
-assert_contains "${dockerfile_content}" "libpango-1.0-0" "7.1: Dockerfile contains libpango-1.0-0"
-assert_contains "${dockerfile_content}" "libasound2t64" "7.1: Dockerfile contains libasound2t64"
-
-# Test 7.1-2: System deps installed before npx playwright install (AC #1)
-sysdeps_line="$(echo "${dockerfile_content}" | grep -n "libnspr4" | head -1 | cut -d: -f1)"
-playwright_line="$(echo "${dockerfile_content}" | grep -n "npx playwright install" | head -1 | cut -d: -f1)"
-if [[ -n "${sysdeps_line}" && -n "${playwright_line}" && "${sysdeps_line}" -lt "${playwright_line}" ]]; then
-  pass "7.1: system deps installed before npx playwright install"
-else
-  fail "7.1: system deps installed before npx playwright install" "sysdeps_line=${sysdeps_line} playwright_line=${playwright_line}"
-fi
+# Test 7.1-1: Dockerfile installs Playwright with --with-deps (AC #1, #2)
+assert_contains "${dockerfile_content}" "playwright install --with-deps chromium" "7.1: Dockerfile contains playwright install --with-deps chromium"
 
 rm -rf "${tmpdir}"
 
@@ -3642,9 +3627,47 @@ assert_exit_code 0 "${exit_code}" "7.1: build without MCP exits code 0"
 
 dockerfile_no_mcp="$(cat "${PROJECT_ROOT}/.sandbox-dockerfile")"
 
-assert_not_contains "${dockerfile_no_mcp}" "libnspr4" "7.1: no libnspr4 without mcp config"
-assert_not_contains "${dockerfile_no_mcp}" "libasound2t64" "7.1: no libasound2t64 without mcp config"
-assert_not_contains "${dockerfile_no_mcp}" "libatk1.0-0t64" "7.1: no libatk1.0-0t64 without mcp config"
+assert_not_contains "${dockerfile_no_mcp}" "playwright install" "7.1: no playwright install without mcp config"
+
+rm -rf "${tmpdir}"
+
+# ============================================================================
+# Story 7.2: Fix Docker Compose Plugin Registration for Podman
+# ============================================================================
+
+echo "# Story 7.2: Fix Docker Compose plugin registration"
+
+# Task 2: Story 7.2 tests using default build (Compose is always installed)
+
+rm -f "${PROJECT_ROOT}/.sandbox-dockerfile"
+tmpdir="$(mktemp -d)"
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+sdks:
+  nodejs: "22"
+YAML
+set +e
+output_all="$(PATH="${BUILD_PATH}" bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "7.2: build exits code 0"
+
+dockerfile_content="$(cat "${PROJECT_ROOT}/.sandbox-dockerfile")"
+
+# Test 7.2-2.1: generated Dockerfile contains cli-plugins directory creation
+assert_contains "${dockerfile_content}" "mkdir -p /usr/local/lib/docker/cli-plugins" "7.2: generated Dockerfile contains cli-plugins directory creation"
+
+# Test 7.2-2.2: generated Dockerfile contains symlink from cli-plugins/docker-compose to /usr/local/bin/docker-compose
+assert_contains "${dockerfile_content}" "ln -sf /usr/local/bin/docker-compose /usr/local/lib/docker/cli-plugins/docker-compose" "7.2: generated Dockerfile contains CLI plugin symlink"
+
+# Test 7.2-2.3: plugin symlink appears AFTER the docker-compose binary download
+compose_download_line="$(echo "${dockerfile_content}" | grep -n "docker-compose-linux" | head -1 | cut -d: -f1)"
+plugin_symlink_line="$(echo "${dockerfile_content}" | grep -n "cli-plugins/docker-compose" | head -1 | cut -d: -f1)"
+if [[ -n "${compose_download_line}" && -n "${plugin_symlink_line}" && "${compose_download_line}" -lt "${plugin_symlink_line}" ]]; then
+  pass "7.2: CLI plugin symlink appears after docker-compose binary download"
+else
+  fail "7.2: CLI plugin symlink appears after docker-compose binary download" "download_line=${compose_download_line} symlink_line=${plugin_symlink_line}"
+fi
 
 rm -rf "${tmpdir}"
 
