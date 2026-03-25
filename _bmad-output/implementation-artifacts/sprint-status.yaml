@@ -1,5 +1,5 @@
 # generated: 2026-03-24
-# last_updated: 2026-03-24
+# last_updated: 2026-03-25
 # project: sandbox
 # project_key: NOKEY
 # tracking_system: file-system
@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-03-24
-last_updated: 2026-03-24
+last_updated: 2026-03-25
 project: sandbox
 
 
@@ -73,7 +73,7 @@ development_status:
   epic-4: in-progress
   4-1-podman-installation-and-docker-alias: done
   4-2-building-and-running-inner-containers: done
-  4-3-isolation-scripts-baked-into-image: backlog
+  4-3-isolation-scripts-baked-into-image: done
   epic-4-retrospective: optional
 
   # Epic 5: MCP Integration -- Agent Can Run Browser Tests via Playwright

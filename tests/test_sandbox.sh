@@ -2778,6 +2778,59 @@ assert_contains "${dockerfile_content}" 'driver = "vfs"' "podman: VFS storage dr
 # Test: default_sysctls cleared for Docker nested operation
 assert_contains "${dockerfile_content}" "default_sysctls = []" "podman: default sysctls cleared for Docker compatibility"
 
+# ============================================================================
+# Story 4.3: Isolation Scripts Baked into Image
+# ============================================================================
+
+echo "# Story 4.3: Isolation scripts baked into image"
+
+# Task 1: Verify isolation script deployment in generated Dockerfile (AC #1)
+
+# Test 4.3-1.1: entrypoint.sh is COPY'd into image
+assert_contains "${dockerfile_content}" "COPY scripts/entrypoint.sh /usr/local/bin/entrypoint.sh" "4.3: entrypoint.sh COPY'd to /usr/local/bin/entrypoint.sh"
+
+# Test 4.3-1.2: git-wrapper.sh is COPY'd as /usr/local/bin/git
+assert_contains "${dockerfile_content}" "COPY scripts/git-wrapper.sh /usr/local/bin/git" "4.3: git-wrapper.sh COPY'd to /usr/local/bin/git"
+
+# Test 4.3-1.3: scripts are made executable
+assert_contains "${dockerfile_content}" "chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/git" "4.3: isolation scripts made executable"
+
+# Test 4.3-1.4: ENTRYPOINT uses tini
+assert_contains "${dockerfile_content}" 'ENTRYPOINT ["tini", "--"]' "4.3: ENTRYPOINT uses tini init system"
+
+# Test 4.3-1.5: CMD runs entrypoint.sh
+assert_contains "${dockerfile_content}" 'CMD ["/usr/local/bin/entrypoint.sh"]' "4.3: CMD runs entrypoint.sh"
+
+# Task 2: Verify script tamper resistance via file ownership model (AC #2)
+
+# Test 4.3-2.1: COPY scripts happens BEFORE useradd sandbox (root ownership)
+copy_line="$(echo "${dockerfile_content}" | grep -n "COPY scripts/git-wrapper.sh" | head -1 | cut -d: -f1)"
+user_line="$(echo "${dockerfile_content}" | grep -n "useradd.*sandbox" | head -1 | cut -d: -f1)"
+if [[ -n "${copy_line}" && -n "${user_line}" && "${copy_line}" -lt "${user_line}" ]]; then
+  pass "4.3: scripts COPY'd before sandbox user created (root ownership preserved)"
+else
+  fail "4.3: scripts COPY'd before sandbox user created (root ownership preserved)" "copy_line=${copy_line} user_line=${user_line}"
+fi
+
+# Test 4.3-2.2: No USER directive in Dockerfile (container starts as root, entrypoint drops privileges)
+if echo "${dockerfile_content}" | grep -q "^USER "; then
+  fail "4.3: no USER directive in generated Dockerfile (privilege drop via runuser in entrypoint)"
+else
+  pass "4.3: no USER directive in generated Dockerfile (privilege drop via runuser in entrypoint)"
+fi
+
+# Test 4.3-2.3: No chown targeting isolation script paths
+assert_not_contains "${dockerfile_content}" "chown sandbox /usr/local/bin/entrypoint" "4.3: no chown (user) on entrypoint script"
+assert_not_contains "${dockerfile_content}" "chown sandbox:sandbox /usr/local/bin/entrypoint" "4.3: no chown (user:group) on entrypoint script"
+assert_not_contains "${dockerfile_content}" "chown sandbox /usr/local/bin/git" "4.3: no chown (user) on git wrapper"
+assert_not_contains "${dockerfile_content}" "chown sandbox:sandbox /usr/local/bin/git" "4.3: no chown (user:group) on git wrapper"
+
+# Task 3: Verify non-root user setup for Podman rootless (AC #3)
+
+# Test 4.3-3.2: sandbox user created with correct shell and home dir
+assert_contains "${dockerfile_content}" "useradd -m -s /bin/bash sandbox" "4.3: sandbox user created with home dir and bash shell"
+
+
 rm -rf "${tmpdir}"
 
 # ============================================================================
