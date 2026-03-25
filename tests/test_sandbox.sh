@@ -3303,6 +3303,352 @@ assert_not_contains "${dockerfile_content}" "gemini-cli" "4.4: no gemini-cli ins
 rm -rf "${tmpdir}"
 
 # ============================================================================
+# AC: cmd_run — tilde expansion in mount sources
+# ============================================================================
+
+echo "# AC: cmd_run — tilde expansion in mount sources"
+
+# Test: tilde mount source expands to $HOME
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin" "${tmpdir}/fakehome/mydata"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+sdks:
+  nodejs: "22"
+mounts:
+  - source: "~/mydata"
+    target: "/data"
+YAML
+set +e
+output_all="$(HOME="${tmpdir}/fakehome" PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "sandbox run with tilde mount exits code 0"
+docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
+assert_contains "${docker_run_line}" "-v ${tmpdir}/fakehome/mydata:/data" "tilde mount source expands to \$HOME"
+rm -rf "${tmpdir}"
+
+# Test: tilde expansion works alongside absolute and relative mounts
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin" "${tmpdir}/fakehome/tildedata" "${tmpdir}/absdata" "${tmpdir}/project/.sandbox" "${tmpdir}/project/reldata"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/project/.sandbox/config.yaml" <<YAML
+agent: claude-code
+sdks:
+  nodejs: "22"
+mounts:
+  - source: "${tmpdir}/absdata"
+    target: "/abs"
+  - source: "../reldata"
+    target: "/rel"
+  - source: "~/tildedata"
+    target: "/tilde"
+YAML
+set +e
+output_all="$(HOME="${tmpdir}/fakehome" PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/project/.sandbox/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "sandbox run with mixed mount types exits code 0"
+docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
+assert_contains "${docker_run_line}" "-v ${tmpdir}/absdata:/abs" "absolute mount resolves correctly alongside tilde"
+assert_contains "${docker_run_line}" "-v ${tmpdir}/project/reldata:/rel" "relative mount resolves correctly alongside tilde"
+assert_contains "${docker_run_line}" "-v ${tmpdir}/fakehome/tildedata:/tilde" "tilde mount resolves correctly alongside others"
+rm -rf "${tmpdir}"
+
+# ============================================================================
+# AC: cmd_run — host_agent_config mount
+# ============================================================================
+
+echo "# AC: cmd_run — host_agent_config mount"
+
+# Test: config with host_agent_config produces -v flag
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin" "${tmpdir}/fake-claude"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<YAML
+agent: claude-code
+sdks:
+  nodejs: "22"
+host_agent_config:
+  source: "${tmpdir}/fake-claude"
+  target: "/home/sandbox/.claude"
+YAML
+set +e
+output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "sandbox run with host_agent_config exits code 0"
+docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
+assert_contains "${docker_run_line}" "-v ${tmpdir}/fake-claude:/home/sandbox/.claude" "host_agent_config produces correct -v flag"
+rm -rf "${tmpdir}"
+
+# Test: config without host_agent_config produces no extra mount
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin" "${tmpdir}/project"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<YAML
+agent: claude-code
+sdks:
+  nodejs: "22"
+mounts:
+  - source: "${tmpdir}/project"
+    target: "/workspace"
+YAML
+set +e
+output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "sandbox run without host_agent_config exits code 0"
+docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
+assert_not_contains "${docker_run_line}" ".claude" "no host agent config mount when field absent"
+rm -rf "${tmpdir}"
+
+# Test: host_agent_config mount does not affect -w flag
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin" "${tmpdir}/project" "${tmpdir}/fake-claude"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<YAML
+agent: claude-code
+sdks:
+  nodejs: "22"
+mounts:
+  - source: "${tmpdir}/project"
+    target: "/workspace"
+host_agent_config:
+  source: "${tmpdir}/fake-claude"
+  target: "/home/sandbox/.claude"
+YAML
+set +e
+output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "sandbox run with mounts + host_agent_config exits code 0"
+docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
+assert_contains "${docker_run_line}" "-w /workspace" "host_agent_config does not affect -w flag"
+rm -rf "${tmpdir}"
+
+# Test: missing source directory produces error
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<YAML
+agent: claude-code
+sdks:
+  nodejs: "22"
+host_agent_config:
+  source: "${tmpdir}/nonexistent"
+  target: "/home/sandbox/.claude"
+YAML
+set +e
+output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 1 "${exit_code}" "missing host_agent_config source dir exits code 1"
+assert_contains "${output_all}" "host_agent_config source directory not found" "missing source dir reports clear error"
+rm -rf "${tmpdir}"
+
+# Test: partial config (source without target) produces error
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin" "${tmpdir}/fake-claude"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<YAML
+agent: claude-code
+sdks:
+  nodejs: "22"
+host_agent_config:
+  source: "${tmpdir}/fake-claude"
+YAML
+set +e
+output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 1 "${exit_code}" "host_agent_config source without target exits code 1"
+assert_contains "${output_all}" "host_agent_config requires both source and target" "partial config (no target) reports clear error"
+rm -rf "${tmpdir}"
+
+# Test: partial config (target without source) produces error
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+sdks:
+  nodejs: "22"
+host_agent_config:
+  target: "/home/sandbox/.claude"
+YAML
+set +e
+output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 1 "${exit_code}" "host_agent_config target without source exits code 1"
+assert_contains "${output_all}" "host_agent_config requires both source and target" "partial config (no source) reports clear error"
+rm -rf "${tmpdir}"
+
+# Test: tilde expansion works in host_agent_config.source
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin" "${tmpdir}/fakehome/.claude"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+sdks:
+  nodejs: "22"
+host_agent_config:
+  source: "~/.claude"
+  target: "/home/sandbox/.claude"
+YAML
+set +e
+output_all="$(HOME="${tmpdir}/fakehome" PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "host_agent_config with tilde source exits code 0"
+docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
+assert_contains "${docker_run_line}" "-v ${tmpdir}/fakehome/.claude:/home/sandbox/.claude" "tilde expansion works in host_agent_config.source"
+rm -rf "${tmpdir}"
+
+# Test: relative target path produces error
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin" "${tmpdir}/fake-claude"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<YAML
+agent: claude-code
+sdks:
+  nodejs: "22"
+host_agent_config:
+  source: "${tmpdir}/fake-claude"
+  target: "relative/path"
+YAML
+set +e
+output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 1 "${exit_code}" "host_agent_config relative target exits code 1"
+assert_contains "${output_all}" "host_agent_config.target must be an absolute path" "relative target reports clear error"
+rm -rf "${tmpdir}"
+
+# Test: HOST_UID and HOST_GID env vars passed when host_agent_config is set
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin" "${tmpdir}/fake-claude"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<YAML
+agent: claude-code
+sdks:
+  nodejs: "22"
+host_agent_config:
+  source: "${tmpdir}/fake-claude"
+  target: "/home/sandbox/.claude"
+YAML
+set +e
+output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "sandbox run with host_agent_config for UID check exits code 0"
+docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
+assert_contains "${docker_run_line}" "-e HOST_UID=" "HOST_UID env var passed when host_agent_config set"
+assert_contains "${docker_run_line}" "-e HOST_GID=" "HOST_GID env var passed when host_agent_config set"
+rm -rf "${tmpdir}"
+
+# Test: HOST_UID/HOST_GID NOT passed when host_agent_config is absent
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+sdks:
+  nodejs: "22"
+YAML
+set +e
+output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "sandbox run without host_agent_config for UID check exits code 0"
+docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
+assert_not_contains "${docker_run_line}" "HOST_UID" "HOST_UID not passed when host_agent_config absent"
+assert_not_contains "${docker_run_line}" "HOST_GID" "HOST_GID not passed when host_agent_config absent"
+rm -rf "${tmpdir}"
+
+# ============================================================================
+# Story 7.1: Fix Playwright System Dependencies
+# ============================================================================
+
+echo "# Story 7.1: Fix Playwright system dependencies"
+
+# Task 4: Playwright system deps present in generated Dockerfile (AC #1, #2)
+
+rm -f "${PROJECT_ROOT}/.sandbox-dockerfile"
+tmpdir="$(mktemp -d)"
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+sdks:
+  nodejs: "22"
+mcp:
+  - playwright
+YAML
+set +e
+output_all="$(PATH="${BUILD_PATH}" bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "7.1: build with mcp playwright exits code 0"
+
+dockerfile_content="$(cat "${PROJECT_ROOT}/.sandbox-dockerfile")"
+
+# Test 7.1-1: Dockerfile contains Playwright system dependency packages (AC #2)
+assert_contains "${dockerfile_content}" "libnspr4" "7.1: Dockerfile contains libnspr4"
+assert_contains "${dockerfile_content}" "libnss3" "7.1: Dockerfile contains libnss3"
+assert_contains "${dockerfile_content}" "libatk1.0-0t64" "7.1: Dockerfile contains libatk1.0-0t64"
+assert_contains "${dockerfile_content}" "libatk-bridge2.0-0t64" "7.1: Dockerfile contains libatk-bridge2.0-0t64"
+assert_contains "${dockerfile_content}" "libdbus-1-3" "7.1: Dockerfile contains libdbus-1-3"
+assert_contains "${dockerfile_content}" "libcups2t64" "7.1: Dockerfile contains libcups2t64"
+assert_contains "${dockerfile_content}" "libxcb1" "7.1: Dockerfile contains libxcb1"
+assert_contains "${dockerfile_content}" "libxkbcommon0" "7.1: Dockerfile contains libxkbcommon0"
+assert_contains "${dockerfile_content}" "libatspi2.0-0t64" "7.1: Dockerfile contains libatspi2.0-0t64"
+assert_contains "${dockerfile_content}" "libx11-6" "7.1: Dockerfile contains libx11-6"
+assert_contains "${dockerfile_content}" "libxcomposite1" "7.1: Dockerfile contains libxcomposite1"
+assert_contains "${dockerfile_content}" "libxdamage1" "7.1: Dockerfile contains libxdamage1"
+assert_contains "${dockerfile_content}" "libxext6" "7.1: Dockerfile contains libxext6"
+assert_contains "${dockerfile_content}" "libxfixes3" "7.1: Dockerfile contains libxfixes3"
+assert_contains "${dockerfile_content}" "libxrandr2" "7.1: Dockerfile contains libxrandr2"
+assert_contains "${dockerfile_content}" "libgbm1" "7.1: Dockerfile contains libgbm1"
+assert_contains "${dockerfile_content}" "libcairo2" "7.1: Dockerfile contains libcairo2"
+assert_contains "${dockerfile_content}" "libpango-1.0-0" "7.1: Dockerfile contains libpango-1.0-0"
+assert_contains "${dockerfile_content}" "libasound2t64" "7.1: Dockerfile contains libasound2t64"
+
+# Test 7.1-2: System deps installed before npx playwright install (AC #1)
+sysdeps_line="$(echo "${dockerfile_content}" | grep -n "libnspr4" | head -1 | cut -d: -f1)"
+playwright_line="$(echo "${dockerfile_content}" | grep -n "npx playwright install" | head -1 | cut -d: -f1)"
+if [[ -n "${sysdeps_line}" && -n "${playwright_line}" && "${sysdeps_line}" -lt "${playwright_line}" ]]; then
+  pass "7.1: system deps installed before npx playwright install"
+else
+  fail "7.1: system deps installed before npx playwright install" "sysdeps_line=${sysdeps_line} playwright_line=${playwright_line}"
+fi
+
+rm -rf "${tmpdir}"
+
+# Test 7.1-3: No Playwright system deps when MCP not configured (AC #1)
+
+rm -f "${PROJECT_ROOT}/.sandbox-dockerfile"
+tmpdir="$(mktemp -d)"
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+sdks:
+  nodejs: "22"
+YAML
+set +e
+output_all="$(PATH="${BUILD_PATH}" bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "7.1: build without MCP exits code 0"
+
+dockerfile_no_mcp="$(cat "${PROJECT_ROOT}/.sandbox-dockerfile")"
+
+assert_not_contains "${dockerfile_no_mcp}" "libnspr4" "7.1: no libnspr4 without mcp config"
+assert_not_contains "${dockerfile_no_mcp}" "libasound2t64" "7.1: no libasound2t64 without mcp config"
+assert_not_contains "${dockerfile_no_mcp}" "libatk1.0-0t64" "7.1: no libatk1.0-0t64 without mcp config"
+
+rm -rf "${tmpdir}"
+
+# ============================================================================
 # Summary
 # ============================================================================
 

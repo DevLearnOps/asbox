@@ -174,6 +174,14 @@ An agent can build Docker images, run multi-service applications with Docker Com
 An agent can use MCP servers (starting with Playwright) to run end-to-end browser tests against running applications inside the sandbox.
 **FRs covered:** FR3, FR29, FR30, FR41
 
+### Epic 6: Host Agent Config Inheritance (Tech Spec)
+The sandbox can mount the host's agent config directory to share authentication and settings, avoiding re-authentication per session.
+**FRs covered:** Related to FR17, FR18 (agent runtime auth)
+
+### Epic 7: Sandbox Runtime Hardening (Sprint Change Proposal 2026-03-25)
+An agent operating inside the sandbox can use all runtime capabilities without encountering missing dependencies, broken commands, or authentication failures.
+**FRs covered:** FR18, FR27, FR29 + Epic 6 bug fix
+
 ## Epic 1: Sandbox Foundation -- Developer Can Build and Launch a Sandbox
 
 A developer can create a configuration file, build a container image from it, and launch an interactive sandbox session with a working agent inside.
@@ -565,3 +573,123 @@ So that MCP integration works automatically without manual configuration.
 **Given** a sandbox with Playwright MCP and a running web application on an inner container
 **When** the agent uses Playwright MCP to open a browser and navigate to the application
 **Then** the browser renders the page and the agent can interact with it for E2E testing
+
+## Epic 7: Sandbox Runtime Hardening
+
+An agent operating inside the sandbox can use all runtime capabilities (Playwright, Docker Compose, Claude CLI auth) without encountering missing dependencies, broken commands, or authentication failures. Added via Sprint Change Proposal 2026-03-25.
+
+**FRs covered:** FR18, FR27, FR29 + Epic 6 bug fix
+
+### Story 7.1: Fix Playwright System Dependencies
+
+As a developer,
+I want Playwright to have all required system libraries pre-installed in the sandbox image,
+So that the agent can run browser-based E2E tests without missing library errors.
+
+**Acceptance Criteria:**
+
+**Given** a sandbox image is built with `mcp: [playwright]` configured
+**When** the agent runs Playwright tests inside the sandbox
+**Then** the browser launches without missing library errors
+
+**Given** the Dockerfile.template Playwright block
+**When** `npx playwright install --with-deps chromium` runs at build time
+**Then** all required system libraries are present (verify the list: libnspr4, libnss3, libatk1.0-0t64, libatk-bridge2.0-0t64, libdbus-1-3, libcups2t64, libxcb1, libxkbcommon0, libatspi2.0-0t64, libx11-6, libxcomposite1, libxdamage1, libxext6, libxfixes3, libxrandr2, libgbm1, libcairo2, libpango-1.0-0, libasound2t64)
+
+**Implementation Notes:**
+- First, verify which libs are actually missing by building and running `ldd` against the Chromium binary
+- The `--with-deps` flag should install these automatically -- investigate why it isn't
+- If `--with-deps` is insufficient, add explicit `apt-get install` for the missing packages in Dockerfile.template
+- The package names have Ubuntu 24.04 `t64` suffixes -- verify exact names
+
+### Story 7.2: Fix Docker Compose Plugin Registration for Podman
+
+As a developer,
+I want `docker compose` (as a subcommand) to work inside the sandbox,
+So that the agent can run multi-service applications using standard Docker Compose commands.
+
+**Acceptance Criteria:**
+
+**Given** a sandbox is running
+**When** the agent runs `docker compose version`
+**Then** the Docker Compose version is displayed (no "daemon not running" error)
+
+**Given** a sandbox with a valid docker-compose.yml
+**When** the agent runs `docker compose up -d`
+**Then** the services start successfully using Podman as the backend
+
+**Given** `docker compose` works
+**When** the agent runs the standalone `docker-compose` command
+**Then** that also works (backwards compatibility)
+
+**Integration Tests Required:**
+- Test that `docker compose version` returns successfully inside the sandbox
+- Test that `docker compose up` with a simple service (e.g., nginx) starts and is reachable via curl
+- Test that `docker compose down` cleans up properly
+
+**Implementation Notes:**
+- Root cause: Docker Compose v2 installed at `/usr/local/bin/docker-compose` (standalone) but `docker compose` subcommand requires plugin registration
+- Fix: Symlink to Docker CLI plugin path: `mkdir -p /usr/local/lib/docker/cli-plugins && ln -s /usr/local/bin/docker-compose /usr/local/lib/docker/cli-plugins/docker-compose`
+- Verify podman-docker plugin path expectations
+- The "docker daemon not running" error likely comes from docker-compose contacting Docker daemon socket instead of routing through Podman
+
+### Story 7.3: Migrate Claude CLI Installation to Official Install Script
+
+As a developer,
+I want Claude Code installed via the official install script instead of the deprecated npm package,
+So that the sandbox uses the supported installation method and avoids future breakage.
+
+**Acceptance Criteria:**
+
+**Given** a sandbox image is built with `agent: claude-code`
+**When** the agent runs `claude --version` inside the sandbox
+**Then** Claude Code responds with its version (installed via official script)
+
+**Given** the Dockerfile.template
+**When** the Claude Code install block is processed
+**Then** it uses the official install script (e.g., `curl -fsSL https://claude.ai/install.sh | sh`) instead of `npm install -g @anthropic-ai/claude-code`
+
+**Given** Claude Code is installed via the official script
+**When** the agent launches with `claude --dangerously-skip-permissions`
+**Then** the agent starts and operates normally
+
+**Implementation Notes:**
+- Current: `Dockerfile.template:68` -- `RUN npm install -g @anthropic-ai/claude-code`
+- New: Replace with the official curl|sh install script
+- Verify the exact install URL
+- PATH may differ from npm global install -- ensure binary available to sandbox user
+- Node.js may still be a dependency -- verify
+
+### Story 7.4: Investigate and Fix Host Agent Config Mount (.claude)
+
+As a developer,
+I want the `host_agent_config` mount to work correctly so the agent picks up my Claude authentication,
+So that I don't have to re-authenticate every time I start a sandbox session.
+
+**Acceptance Criteria:**
+
+**Given** a config with `host_agent_config: {source: "~/.claude", target: "/home/sandbox/.claude"}`
+**When** the sandbox starts and the agent launches
+**Then** Claude Code recognizes the existing authentication and does not prompt for login
+
+**Given** the host `~/.claude` directory contains valid OAuth tokens
+**When** the agent runs inside the sandbox
+**Then** the tokens are accessible and the agent can make API calls
+
+**Given** the UID alignment works correctly
+**When** the sandbox user reads files from the mounted `.claude` directory
+**Then** the files are readable and writable by the sandbox user
+
+**Implementation Notes -- Investigation Required:**
+This story requires root cause analysis before implementation. Possible causes:
+1. HOME mismatch: Claude CLI may look for config at `$HOME/.claude`, but HOME might not be `/home/sandbox` when running via `runuser`
+2. Path structure mismatch: Claude CLI may expect a specific directory structure inside `.claude/`
+3. UID alignment not triggered: If HOST_UID matches sandbox user UID (1000), alignment skipped but GID might differ
+4. Symlink resolution: Bind mount may not resolve symlinks across host/container boundary
+5. File locking: Claude CLI file locks may not work over bind mounts (macOS VirtioFS)
+6. Claude CLI version mismatch: Config format may differ between npm and official install versions
+
+**Investigation steps:**
+- Start sandbox with mount, exec in, check: `ls -la /home/sandbox/.claude/`, `echo $HOME`, `id`, `whoami`
+- Run `claude --version` and check for config-related errors in verbose mode
+- Compare `.claude` directory contents on host vs inside container

@@ -70,7 +70,7 @@ development_status:
   epic-3-retrospective: optional
 
   # Epic 4: Inner Container Runtime -- Agent Can Build and Run Docker Services
-  epic-4: in-progress
+  epic-4: done
   4-1-podman-installation-and-docker-alias: done
   4-2-building-and-running-inner-containers: done
   4-3-isolation-scripts-baked-into-image: done
@@ -78,7 +78,20 @@ development_status:
   epic-4-retrospective: optional
 
   # Epic 5: MCP Integration -- Agent Can Run Browser Tests via Playwright
-  epic-5: in-progress
+  epic-5: done
   5-1-mcp-server-installation-at-build-time: done
   5-2-mcp-configuration-generation-and-merge: done
   epic-5-retrospective: optional
+
+  # Epic 6: Host Agent Config Inheritance (tech spec)
+  epic-6: done
+  6-1-host-agent-config-inheritance: done
+  epic-6-retrospective: optional
+
+  # Epic 7: Sandbox Runtime Hardening (sprint change proposal 2026-03-25)
+  epic-7: in-progress
+  7-1-fix-playwright-system-dependencies: review
+  7-2-fix-docker-compose-plugin-registration: backlog
+  7-3-migrate-claude-cli-to-official-install-script: backlog
+  7-4-investigate-fix-host-agent-config-mount: backlog
+  epic-7-retrospective: optional

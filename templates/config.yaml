@@ -35,3 +35,15 @@ packages:
 # MCP servers to pre-install
 # mcp:
 #   - playwright
+
+# Host agent config directory to mount into sandbox
+# Shares authentication and settings from host (supports OAuth/SSO)
+# WARNING: This is a read-write mount. The sandboxed agent can modify
+# your host config (settings, tokens, conversation history).
+# This is required for OAuth token refresh to stay synchronized.
+# Defaults by agent:
+#   claude-code: source: "~/.claude", target: "/home/sandbox/.claude"
+#   gemini-cli:  source: "~/.config/gemini", target: "/home/sandbox/.config/gemini"
+# host_agent_config:
+#   source: "~/.claude"
+#   target: "/home/sandbox/.claude"

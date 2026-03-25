@@ -74,6 +74,13 @@ RUN npm install -g @google/gemini-cli
 
 # {{IF_MCP_PLAYWRIGHT}}
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers
+# Chromium system deps — t64 suffixes are Ubuntu 24.04-specific (Noble time_t migration)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libnspr4 libnss3 libatk1.0-0t64 libatk-bridge2.0-0t64 \
+    libdbus-1-3 libcups2t64 libxcb1 libxkbcommon0 libatspi2.0-0t64 \
+    libx11-6 libxcomposite1 libxdamage1 libxext6 libxfixes3 libxrandr2 \
+    libgbm1 libcairo2 libpango-1.0-0 libasound2t64 \
+    && rm -rf /var/lib/apt/lists/*
 RUN npm install -g @playwright/mcp@{{MCP_PLAYWRIGHT_VERSION}} && npx playwright install --with-deps chromium
 # {{/IF_MCP_PLAYWRIGHT}}
 

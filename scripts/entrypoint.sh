@@ -11,6 +11,20 @@ if [[ "$(id -u)" == "0" ]]; then
   grep " /proc/" /proc/self/mountinfo | awk '{print $5}' | sort -r | while read -r mp; do
     umount "$mp" 2>/dev/null || true
   done
+  # Align sandbox user UID/GID with host user for bind mount permissions
+  if [[ -n "${HOST_UID:-}" ]]; then
+    if ! [[ "${HOST_UID}" =~ ^[0-9]+$ ]] || [[ "${HOST_UID}" -eq 0 ]]; then
+      echo "error: HOST_UID must be a non-zero numeric value (got: ${HOST_UID})" >&2
+      exit 1
+    fi
+    current_uid="$(id -u sandbox)"
+    if [[ "${HOST_UID}" != "${current_uid}" ]]; then
+      usermod -u "${HOST_UID}" sandbox
+      groupmod -g "${HOST_GID:-$(id -g sandbox)}" sandbox 2>/dev/null || true
+      chown -R sandbox:sandbox /home/sandbox
+    fi
+  fi
+
   # Re-exec this script as the sandbox user
   exec runuser -u sandbox -- "$0" "$@"
 fi

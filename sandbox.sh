@@ -80,6 +80,8 @@ CFG_MOUNT_SOURCES=()
 CFG_MOUNT_TARGETS=()
 CFG_ENV_KEYS=()
 CFG_ENV_VALUES=()
+CFG_HOST_AGENT_CONFIG_SOURCE=""
+CFG_HOST_AGENT_CONFIG_TARGET=""
 RESOLVED_DOCKERFILE=""
 CONTENT_HASH=""
 IMAGE_TAG=""
@@ -176,6 +178,12 @@ parse_config() {
       CFG_MCP+=("${line}")
     done < <(yq eval '.mcp[]' "${CONFIG_PATH}")
   fi
+
+  # Extract host_agent_config (optional object with source/target)
+  CFG_HOST_AGENT_CONFIG_SOURCE="$(yq eval '.host_agent_config.source // ""' "${CONFIG_PATH}")"
+  if [[ "${CFG_HOST_AGENT_CONFIG_SOURCE}" == "null" ]]; then CFG_HOST_AGENT_CONFIG_SOURCE=""; fi
+  CFG_HOST_AGENT_CONFIG_TARGET="$(yq eval '.host_agent_config.target // ""' "${CONFIG_PATH}")"
+  if [[ "${CFG_HOST_AGENT_CONFIG_TARGET}" == "null" ]]; then CFG_HOST_AGENT_CONFIG_TARGET=""; fi
 }
 
 # ============================================================================
@@ -486,8 +494,10 @@ cmd_run() {
     local src="${CFG_MOUNT_SOURCES[$i]}"
     local tgt="${CFG_MOUNT_TARGETS[$i]}"
 
-    # Resolve relative source paths against config file directory
-    if [[ "${src}" != /* ]]; then
+    # Resolve source paths: tilde expansion, then relative-to-config-dir
+    if [[ "${src}" == "~/"* ]]; then
+      src="${HOME}/${src#\~/}"
+    elif [[ "${src}" != /* ]]; then
       src="$(cd "${config_dir}/${src}" && pwd)"
     fi
 
@@ -497,6 +507,29 @@ cmd_run() {
   # Set working directory to first mount target (if any mounts exist)
   if [[ ${#CFG_MOUNT_TARGETS[@]} -gt 0 ]]; then
     run_flags+=("-w" "${CFG_MOUNT_TARGETS[0]}")
+  fi
+
+  # Mount host agent config directory (if configured)
+  if [[ -n "${CFG_HOST_AGENT_CONFIG_SOURCE}" || -n "${CFG_HOST_AGENT_CONFIG_TARGET}" ]]; then
+    if [[ -z "${CFG_HOST_AGENT_CONFIG_SOURCE}" || -z "${CFG_HOST_AGENT_CONFIG_TARGET}" ]]; then
+      die "host_agent_config requires both source and target" 1
+    fi
+    if [[ "${CFG_HOST_AGENT_CONFIG_TARGET}" != /* ]]; then
+      die "host_agent_config.target must be an absolute path" 1
+    fi
+    local hac_src="${CFG_HOST_AGENT_CONFIG_SOURCE}"
+    # Apply tilde expansion
+    if [[ "${hac_src}" == "~/"* ]]; then
+      hac_src="${HOME}/${hac_src#\~/}"
+    elif [[ "${hac_src}" != /* ]]; then
+      hac_src="$(cd "${config_dir}/${hac_src}" && pwd)"
+    fi
+    if [[ ! -d "${hac_src}" ]]; then
+      die "host_agent_config source directory not found: ${hac_src}" 1
+    fi
+    run_flags+=("-v" "${hac_src}:${CFG_HOST_AGENT_CONFIG_TARGET}")
+    # Pass host UID/GID for cross-platform permission alignment
+    run_flags+=("-e" "HOST_UID=$(id -u)" "-e" "HOST_GID=$(id -g)")
   fi
 
   info "starting sandbox: ${IMAGE_TAG}"
