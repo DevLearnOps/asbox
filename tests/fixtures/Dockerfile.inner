@@ -1,0 +1,7 @@
+# Minimal Dockerfile for inner container build testing (Story 4-2)
+# Used to verify that `docker build` works inside the sandbox via Podman rootless.
+# This image runs a simple HTTP server on port 3000 for port forwarding tests.
+FROM docker.io/library/alpine:3.20
+RUN apk add --no-cache busybox-extras
+EXPOSE 3000
+CMD ["httpd", "-f", "-p", "3000", "-h", "/tmp"]

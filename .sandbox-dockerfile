@@ -23,18 +23,25 @@ RUN curl -fsSL "https://download.opensuse.org/repositories/devel:kubic:libcontai
       https://download.opensuse.org/repositories/devel:kubic:libcontainers:unstable/xUbuntu_24.04/ /" \
       > /etc/apt/sources.list.d/podman-kubic.list && \
     apt-get update && \
-    apt-get install -y --no-install-recommends podman podman-docker uidmap fuse-overlayfs && \
+    apt-get install -y --no-install-recommends podman podman-docker uidmap fuse-overlayfs slirp4netns && \
     rm -rf /var/lib/apt/lists/*
 
 # Suppress "Emulate Docker CLI" warnings
 RUN touch /etc/containers/nodocker
 
-# Docker Compose compatibility (podman compose backend)
-RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip \
-    && rm -rf /var/lib/apt/lists/* \
-    && pip3 install --break-system-packages podman-compose==1.5.0 \
-    && printf '#!/bin/sh\nexec podman compose "$@"\n' > /usr/local/bin/docker-compose \
-    && chmod +x /usr/local/bin/docker-compose
+# Configure Podman for nested container operation (inside Docker)
+# - storage driver "vfs": compatible with all kernels (fuse-overlayfs fails on LinuxKit/Docker Desktop)
+# - Clear default_sysctls: prevents crun from writing to /proc/sys (read-only in Docker)
+# - events_logger "file": avoids journald dependency in containers
+RUN printf '[storage]\ndriver = "vfs"\n' > /etc/containers/storage.conf && \
+    printf '[containers]\ndefault_sysctls = []\n\n[engine]\nevents_logger = "file"\n' \
+      > /etc/containers/containers.conf
+
+# Docker Compose v2 standalone binary (provides service-name DNS via Netavark bridge networking)
+RUN ARCH="$(uname -m)" && \
+    curl -fsSL "https://github.com/docker/compose/releases/download/v2.35.1/docker-compose-linux-${ARCH}" \
+      -o /usr/local/bin/docker-compose && \
+    chmod +x /usr/local/bin/docker-compose
 
 # System packages from config
 
@@ -49,11 +56,17 @@ RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/git
 # Non-root user for rootless operation
 RUN useradd -m -s /bin/bash sandbox
 
-# Configure rootless Podman for sandbox user
-RUN echo "sandbox:100000:65536" >> /etc/subuid && \
-    echo "sandbox:100000:65536" >> /etc/subgid
+# Configure rootless Podman for sandbox user (overwrite to avoid duplicates from useradd)
+RUN echo "sandbox:100000:65536" > /etc/subuid && \
+    echo "sandbox:100000:65536" > /etc/subgid && \
+    chmod 4755 /usr/bin/newuidmap /usr/bin/newgidmap
 
-USER sandbox
+# Pre-create XDG_RUNTIME_DIR for rootless Podman (must be done as root)
+RUN SANDBOX_UID=$(id -u sandbox) && \
+    mkdir -p /run/user/${SANDBOX_UID} && \
+    chown sandbox:sandbox /run/user/${SANDBOX_UID} && \
+    chmod 700 /run/user/${SANDBOX_UID}
 
+# Entrypoint starts as root to fix mount propagation, then drops to sandbox user
 ENTRYPOINT ["tini", "--"]
 CMD ["/usr/local/bin/entrypoint.sh"]

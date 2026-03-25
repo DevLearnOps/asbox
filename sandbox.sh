@@ -313,9 +313,13 @@ process_template() {
   # Step 3: Substitute value placeholders
   local safe_val
 
-  # Derive Ubuntu version from BASE_IMAGE (e.g., "ubuntu:24.04@sha256:..." -> "24.04")
+  # Derive Ubuntu version from BASE_IMAGE
+  # Handles: "ubuntu:24.04", "ubuntu:24.04@sha256:...", "registry:5000/ubuntu:24.04@sha256:..."
   local ubuntu_version
-  ubuntu_version="$(echo "${BASE_IMAGE}" | sed 's/[^:]*://; s/@.*//')"
+  ubuntu_version="$(echo "${BASE_IMAGE}" | sed 's/@.*//; s/.*://')"
+  if [[ ! "${ubuntu_version}" =~ ^[0-9]+\.[0-9]+$ ]]; then
+    die "cannot derive Ubuntu version from BASE_IMAGE '${BASE_IMAGE}' (got '${ubuntu_version}')" 1
+  fi
   safe_val="$(sed_escape_replacement "${ubuntu_version}")"
   template="$(echo "${template}" | sed "s|{{UBUNTU_VERSION}}|${safe_val}|g")"
 
@@ -391,6 +395,12 @@ cmd_run() {
   # Assemble docker run flags using array (safe for paths with spaces)
   local run_flags=()
   run_flags+=("-it" "--rm")
+  run_flags+=("--device" "/dev/net/tun")
+  run_flags+=("--device" "/dev/fuse")
+  run_flags+=("--security-opt" "seccomp=unconfined")
+  run_flags+=("--security-opt" "apparmor=unconfined")
+  run_flags+=("--security-opt" "label=disable")
+  run_flags+=("--cap-add" "SYS_ADMIN")
   run_flags+=("-e" "SANDBOX_AGENT=${CFG_AGENT}")
 
   # Inject secrets as env vars (Docker reads from host environment)

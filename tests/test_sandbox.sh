@@ -746,8 +746,7 @@ assert_exit_code 0 "${exit_code}" "template with no SDKs exits code 0"
 
 dockerfile_content="$(cat "${PROJECT_ROOT}/.sandbox-dockerfile")"
 assert_not_contains "${dockerfile_content}" "nodejs" "no SDKs: no Node.js install"
-assert_not_contains "${dockerfile_content}" "python3." "no SDKs: no versioned Python SDK install"
-assert_not_contains "${dockerfile_content}" "IF_PYTHON" "no SDKs: no Python SDK conditional block"
+assert_not_contains "${dockerfile_content}" "python" "no SDKs: no Python install"
 assert_not_contains "${dockerfile_content}" "go.dev" "no SDKs: no Go install"
 assert_not_contains "${dockerfile_content}" "IF_" "no SDKs: no conditional tags remain"
 assert_contains "${dockerfile_content}" "tini" "no SDKs: base tooling (tini) remains"
@@ -781,7 +780,7 @@ dockerfile_content="$(cat "${PROJECT_ROOT}/.sandbox-dockerfile")"
 assert_contains "${dockerfile_content}" "setup_20.x" "all SDKs: Node.js 20 install present"
 assert_contains "${dockerfile_content}" "python3.11" "all SDKs: Python 3.11 install present"
 assert_contains "${dockerfile_content}" "go1.22.linux-amd64" "all SDKs: Go 1.22 install present"
-assert_contains "${dockerfile_content}" "podman-compose" "all SDKs: podman-compose still present alongside Python SDK"
+assert_contains "${dockerfile_content}" "docker-compose" "all SDKs: docker-compose binary still present alongside Python SDK"
 assert_not_contains "${dockerfile_content}" "IF_" "all SDKs: no conditional tags remain"
 rm -rf "${tmpdir}"
 
@@ -2111,6 +2110,207 @@ assert_contains "${output_all}" "error: gemini not found in PATH" "entrypoint pr
 rm -rf "${empty_bin_dir}"
 
 # ============================================================================
+# AC: entrypoint.sh — Podman rootless initialization (Story 4-2)
+# ============================================================================
+
+echo "# AC: entrypoint.sh — Podman rootless initialization"
+
+# Test: entrypoint.sh contains XDG_RUNTIME_DIR setup
+entrypoint_content="$(cat "${ENTRYPOINT}")"
+assert_contains "${entrypoint_content}" "XDG_RUNTIME_DIR" "entrypoint sets XDG_RUNTIME_DIR for rootless Podman"
+
+# Test: entrypoint.sh contains podman system migrate initialization
+assert_contains "${entrypoint_content}" "podman system migrate" "entrypoint runs podman system migrate for rootless init"
+
+# Test: entrypoint.sh creates XDG_RUNTIME_DIR directory
+assert_contains "${entrypoint_content}" 'mkdir -p "${XDG_RUNTIME_DIR}"' "entrypoint creates XDG_RUNTIME_DIR directory"
+
+# Test: Podman init runs BEFORE the SANDBOX_AGENT check (before exec)
+# The XDG_RUNTIME_DIR line must appear before the case/exec block
+xdg_line="$(grep -n 'XDG_RUNTIME_DIR' "${ENTRYPOINT}" | head -1 | cut -d: -f1)"
+case_line="$(grep -n 'case.*SANDBOX_AGENT' "${ENTRYPOINT}" | head -1 | cut -d: -f1)"
+if [[ -n "${xdg_line}" && -n "${case_line}" && "${xdg_line}" -lt "${case_line}" ]]; then
+  pass "Podman init runs before agent exec (line ${xdg_line} < ${case_line})"
+else
+  fail "Podman init runs before agent exec" "XDG_RUNTIME_DIR at line ${xdg_line:-?}, case at line ${case_line:-?}"
+fi
+
+# Test: entrypoint.sh runs podman info verification (subtask 1.3)
+# When podman is available, entrypoint should verify it works
+assert_contains "${entrypoint_content}" "podman info" "entrypoint verifies podman info succeeds"
+
+# Test: entrypoint.sh Podman init works with mock podman binary
+tmpdir="$(mktemp -d)"
+mock_agent_dir="$(mktemp -d)"
+cat > "${mock_agent_dir}/claude" <<MOCK
+#!/usr/bin/env bash
+echo "claude \$*" > "${tmpdir}/agent.log"
+MOCK
+chmod +x "${mock_agent_dir}/claude"
+cat > "${mock_agent_dir}/podman" <<MOCK
+#!/usr/bin/env bash
+echo "podman \$*" >> "${tmpdir}/podman.log"
+exit 0
+MOCK
+chmod +x "${mock_agent_dir}/podman"
+cat > "${mock_agent_dir}/id" <<MOCK
+#!/usr/bin/env bash
+echo "1000"
+MOCK
+chmod +x "${mock_agent_dir}/id"
+
+set +e
+SANDBOX_AGENT=claude-code PATH="${mock_agent_dir}:${SYSTEM_PATH}" bash "${ENTRYPOINT}" 2>&1
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "entrypoint with podman init exits code 0"
+if [[ -f "${tmpdir}/podman.log" ]]; then
+  podman_calls="$(cat "${tmpdir}/podman.log")"
+  assert_contains "${podman_calls}" "system migrate" "entrypoint calls podman system migrate"
+  assert_contains "${podman_calls}" "info" "entrypoint calls podman info"
+else
+  fail "entrypoint calls podman system migrate" "podman.log not created"
+  fail "entrypoint calls podman info" "podman.log not created"
+fi
+rm -rf "${tmpdir}" "${mock_agent_dir}"
+
+# Test: entrypoint.sh Podman init gracefully handles missing podman
+tmpdir="$(mktemp -d)"
+mock_agent_dir="$(mktemp -d)"
+cat > "${mock_agent_dir}/claude" <<MOCK
+#!/usr/bin/env bash
+echo "claude \$*" > "${tmpdir}/agent.log"
+MOCK
+chmod +x "${mock_agent_dir}/claude"
+# No podman mock — podman is not in PATH
+cat > "${mock_agent_dir}/id" <<MOCK
+#!/usr/bin/env bash
+echo "1000"
+MOCK
+chmod +x "${mock_agent_dir}/id"
+
+set +e
+SANDBOX_AGENT=claude-code PATH="${mock_agent_dir}:${SYSTEM_PATH}" bash "${ENTRYPOINT}" 2>&1
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "entrypoint without podman still starts agent (graceful skip)"
+rm -rf "${tmpdir}" "${mock_agent_dir}"
+
+# ============================================================================
+# AC: Inner container build and compose fixtures (Story 4-2)
+#
+# UNIT-TESTABLE (run in CI without container runtime):
+#   - Fixture files exist and are well-formed (Dockerfile.inner, docker-compose.yml)
+#   - cmd_run() output contains no -p, --publish, or --network=host flags
+#   - entrypoint.sh contains Podman rootless initialization logic
+#
+# REQUIRES LIVE CONTAINER (manual validation inside a running sandbox):
+#   - `docker build -t myapp -f tests/fixtures/Dockerfile.inner .` succeeds
+#   - `docker compose up -d` starts both services (from tests/fixtures/)
+#   - Inter-service communication: exec into client, wget http://localhost:3000
+#   - Port forwarding: `curl localhost:3000` reaches the inner container
+#   - Rootless port limitation: ports < 1024 require sysctl adjustment
+#
+# ============================================================================
+
+echo "# AC: Inner container build and compose fixtures"
+
+# Test: Dockerfile.inner fixture exists and contains FROM instruction (subtask 2.1)
+inner_dockerfile="${PROJECT_ROOT}/tests/fixtures/Dockerfile.inner"
+if [[ -f "${inner_dockerfile}" ]]; then
+  pass "inner container Dockerfile fixture exists"
+  inner_df_content="$(cat "${inner_dockerfile}")"
+  assert_contains "${inner_df_content}" "FROM" "inner Dockerfile contains FROM instruction"
+  assert_contains "${inner_df_content}" "EXPOSE" "inner Dockerfile contains EXPOSE instruction"
+  assert_contains "${inner_df_content}" "3000" "inner Dockerfile exposes port 3000"
+else
+  fail "inner container Dockerfile fixture exists" "tests/fixtures/Dockerfile.inner not found"
+  fail "inner Dockerfile contains FROM instruction" "file missing"
+  fail "inner Dockerfile contains EXPOSE instruction" "file missing"
+  fail "inner Dockerfile exposes port 3000" "file missing"
+fi
+
+# Test: docker-compose.yml fixture exists and defines two services (subtask 3.1)
+compose_fixture="${PROJECT_ROOT}/tests/fixtures/docker-compose.yml"
+if [[ -f "${compose_fixture}" ]]; then
+  pass "docker-compose.yml fixture exists"
+  compose_content="$(cat "${compose_fixture}")"
+  assert_contains "${compose_content}" "services:" "compose fixture defines services"
+  assert_contains "${compose_content}" "web:" "compose fixture defines web service"
+  assert_contains "${compose_content}" "client:" "compose fixture defines client service"
+else
+  fail "docker-compose.yml fixture exists" "tests/fixtures/docker-compose.yml not found"
+  fail "compose fixture defines services" "file missing"
+  fail "compose fixture defines web service" "file missing"
+  fail "compose fixture defines client service" "file missing"
+fi
+
+# ============================================================================
+# AC: Inner container network isolation (Story 4-2)
+# Unit-testable: verify cmd_run() output does NOT expose ports
+# ============================================================================
+
+echo "# AC: Inner container network isolation"
+
+# Test: cmd_run() does not publish ports (no -p flag) (subtask 5.1, 5.2)
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+YAML
+set +e
+output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+set -e
+docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
+assert_contains "${docker_run_line}" "docker run" "isolation: docker run command captured for port check"
+assert_not_contains "${docker_run_line}" " -p " "cmd_run() does not publish ports (no -p flag)"
+assert_not_contains "${docker_run_line}" " --publish " "cmd_run() does not publish ports (no --publish flag)"
+assert_not_contains "${docker_run_line}" "--network=host" "cmd_run() does not use host networking (= form)"
+assert_not_contains "${docker_run_line}" "--network host" "cmd_run() does not use host networking (space form)"
+rm -rf "${tmpdir}"
+
+# Test: cmd_run() with mounts still does not expose ports (subtask 5.2)
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin" "${tmpdir}/project"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<YAML
+agent: claude-code
+mounts:
+  - source: ${tmpdir}/project
+    target: /workspace
+YAML
+set +e
+output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+set -e
+docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
+assert_contains "${docker_run_line}" "docker run" "isolation: docker run with mounts captured"
+assert_not_contains "${docker_run_line}" " -p " "cmd_run() with mounts does not publish ports"
+assert_not_contains "${docker_run_line}" " --publish " "cmd_run() with mounts does not use --publish"
+rm -rf "${tmpdir}"
+
+# Test: cmd_run() with secrets and env vars still does not expose ports
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+secrets:
+  - MY_SECRET
+env:
+  APP_ENV: production
+YAML
+export MY_SECRET="test"
+set +e
+output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+set -e
+unset MY_SECRET
+docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
+assert_contains "${docker_run_line}" "docker run" "isolation: docker run with secrets/env captured"
+assert_not_contains "${docker_run_line}" " -p " "cmd_run() with secrets/env does not publish ports"
+rm -rf "${tmpdir}"
+
+# ============================================================================
 # AC: git-wrapper.sh — transparent passthrough to real git
 # ============================================================================
 
@@ -2395,6 +2595,12 @@ set -e
 docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
 assert_contains "${docker_run_line}" "docker run" "isolation: docker run command was captured"
 assert_not_contains "${docker_run_line}" "--privileged" "docker run must not use --privileged flag"
+assert_contains "${docker_run_line}" "--device /dev/net/tun" "docker run passes /dev/net/tun for rootless Podman networking"
+assert_contains "${docker_run_line}" "--device /dev/fuse" "docker run passes /dev/fuse for fuse-overlayfs storage"
+assert_contains "${docker_run_line}" "seccomp=unconfined" "docker run disables seccomp for rootless Podman user namespaces"
+assert_contains "${docker_run_line}" "apparmor=unconfined" "docker run disables AppArmor for rootless Podman"
+assert_contains "${docker_run_line}" "label=disable" "docker run disables SELinux label separation"
+assert_contains "${docker_run_line}" "SYS_ADMIN" "docker run adds SYS_ADMIN cap for nested container /proc mount"
 rm -rf "${tmpdir}"
 
 # Test: docker run does NOT mount Docker socket (NFR4)
@@ -2552,9 +2758,25 @@ assert_contains "${dockerfile_content}" "100000:65536" "podman: generated Docker
 assert_contains "${dockerfile_content}" "uidmap" "podman: generated Dockerfile installs uidmap for rootless"
 assert_contains "${dockerfile_content}" "fuse-overlayfs" "podman: generated Dockerfile installs fuse-overlayfs for storage"
 
-# Test: generated Dockerfile contains Docker Compose compatibility
-assert_contains "${dockerfile_content}" "podman-compose" "podman: generated Dockerfile installs podman-compose"
-assert_contains "${dockerfile_content}" "docker-compose" "podman: generated Dockerfile provides docker-compose wrapper"
+# Test: generated Dockerfile contains Docker Compose v2 binary
+assert_contains "${dockerfile_content}" "docker-compose" "podman: generated Dockerfile installs docker-compose v2 binary"
+assert_contains "${dockerfile_content}" "docker/compose/releases" "podman: docker-compose fetched from official GitHub releases"
+
+# Test: generated Dockerfile pre-creates XDG_RUNTIME_DIR for rootless Podman
+assert_contains "${dockerfile_content}" "/run/user/" "podman: generated Dockerfile pre-creates XDG_RUNTIME_DIR"
+
+# Test (P-1): UBUNTU_VERSION placeholder is resolved to a numeric version in the Kubic URL
+assert_contains "${dockerfile_content}" "xUbuntu_24.04" "podman: Kubic repo URL contains resolved Ubuntu version (24.04)"
+assert_not_contains "${dockerfile_content}" "UBUNTU_VERSION" "podman: no unresolved UBUNTU_VERSION placeholder"
+
+# Test (P-4): Podman Kubic/OBS repository is configured (version verified at integration time)
+assert_contains "${dockerfile_content}" "devel:kubic:libcontainers" "podman: Kubic/OBS repository configured for upstream Podman"
+
+# Test: VFS storage driver configured for nested container compatibility
+assert_contains "${dockerfile_content}" 'driver = "vfs"' "podman: VFS storage driver configured"
+
+# Test: default_sysctls cleared for Docker nested operation
+assert_contains "${dockerfile_content}" "default_sysctls = []" "podman: default sysctls cleared for Docker compatibility"
 
 rm -rf "${tmpdir}"
 
