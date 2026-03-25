@@ -12,6 +12,8 @@ if [[ "$(id -u)" == "0" ]]; then
     umount "$mp" 2>/dev/null || true
   done
   # Align sandbox user UID/GID with host user for bind mount permissions
+  uid_changed=false
+  gid_changed=false
   if [[ -n "${HOST_UID:-}" ]]; then
     if ! [[ "${HOST_UID}" =~ ^[0-9]+$ ]] || [[ "${HOST_UID}" -eq 0 ]]; then
       echo "error: HOST_UID must be a non-zero numeric value (got: ${HOST_UID})" >&2
@@ -20,9 +22,23 @@ if [[ "$(id -u)" == "0" ]]; then
     current_uid="$(id -u sandbox)"
     if [[ "${HOST_UID}" != "${current_uid}" ]]; then
       usermod -u "${HOST_UID}" sandbox
-      groupmod -g "${HOST_GID:-$(id -g sandbox)}" sandbox 2>/dev/null || true
-      chown -R sandbox:sandbox /home/sandbox
+      uid_changed=true
     fi
+  fi
+  if [[ -n "${HOST_GID:-}" ]]; then
+    if ! [[ "${HOST_GID}" =~ ^[0-9]+$ ]] || [[ "${HOST_GID}" -eq 0 ]]; then
+      echo "error: HOST_GID must be a non-zero numeric value (got: ${HOST_GID})" >&2
+      exit 1
+    fi
+    current_gid="$(id -g sandbox)"
+    if [[ "${HOST_GID}" != "${current_gid}" ]]; then
+      groupmod -g "${HOST_GID}" sandbox 2>/dev/null || true
+      gid_changed=true
+    fi
+  fi
+  # Fix ownership of home dir contents after UID/GID change (excludes bind mounts outside /home)
+  if [[ "${uid_changed}" == "true" || "${gid_changed}" == "true" ]]; then
+    chown -R sandbox:sandbox /home/sandbox
   fi
 
   # Ensure XDG_RUNTIME_DIR exists for the sandbox user (must run as root since /run/user is root-owned)
@@ -95,6 +111,15 @@ fi
 case "${SANDBOX_AGENT}" in
   claude-code)
     command -v claude >/dev/null 2>&1 || { echo "error: claude not found in PATH" >&2; exit 1; }
+    # Restore .claude.json from backup if missing (container may have been killed mid-write)
+    _cc_dir="${CLAUDE_CONFIG_DIR:-${HOME}/.claude}"
+    if [[ -d "${_cc_dir}" && ! -f "${_cc_dir}/.claude.json" ]]; then
+      _latest="$(ls -t "${_cc_dir}/backups/.claude.json.backup."* 2>/dev/null | head -1)"
+      if [[ -n "${_latest}" ]]; then
+        cp "${_latest}" "${_cc_dir}/.claude.json"
+        echo "sandbox: restored .claude.json from backup"
+      fi
+    fi
     exec claude --dangerously-skip-permissions
     ;;
   gemini-cli)

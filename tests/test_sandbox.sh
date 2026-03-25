@@ -3384,7 +3384,7 @@ sdks:
   nodejs: "22"
 host_agent_config:
   source: "${tmpdir}/fake-claude"
-  target: "/home/sandbox/.claude"
+  target: "/opt/claude-config"
 YAML
 set +e
 output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
@@ -3392,7 +3392,8 @@ exit_code=$?
 set -e
 assert_exit_code 0 "${exit_code}" "sandbox run with host_agent_config exits code 0"
 docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
-assert_contains "${docker_run_line}" "-v ${tmpdir}/fake-claude:/home/sandbox/.claude" "host_agent_config produces correct -v flag"
+assert_contains "${docker_run_line}" "-v ${tmpdir}/fake-claude:/opt/claude-config" "host_agent_config produces correct -v flag"
+assert_contains "${docker_run_line}" "-e CLAUDE_CONFIG_DIR=/opt/claude-config" "CLAUDE_CONFIG_DIR env var set for claude-code agent"
 rm -rf "${tmpdir}"
 
 # Test: config without host_agent_config produces no extra mount
@@ -3413,7 +3414,7 @@ exit_code=$?
 set -e
 assert_exit_code 0 "${exit_code}" "sandbox run without host_agent_config exits code 0"
 docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
-assert_not_contains "${docker_run_line}" ".claude" "no host agent config mount when field absent"
+assert_not_contains "${docker_run_line}" "claude-config" "no host agent config mount when field absent"
 rm -rf "${tmpdir}"
 
 # Test: host_agent_config mount does not affect -w flag
@@ -3429,7 +3430,7 @@ mounts:
     target: "/workspace"
 host_agent_config:
   source: "${tmpdir}/fake-claude"
-  target: "/home/sandbox/.claude"
+  target: "/opt/claude-config"
 YAML
 set +e
 output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
@@ -3450,7 +3451,7 @@ sdks:
   nodejs: "22"
 host_agent_config:
   source: "${tmpdir}/nonexistent"
-  target: "/home/sandbox/.claude"
+  target: "/opt/claude-config"
 YAML
 set +e
 output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
@@ -3488,7 +3489,7 @@ agent: claude-code
 sdks:
   nodejs: "22"
 host_agent_config:
-  target: "/home/sandbox/.claude"
+  target: "/opt/claude-config"
 YAML
 set +e
 output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
@@ -3508,7 +3509,7 @@ sdks:
   nodejs: "22"
 host_agent_config:
   source: "~/.claude"
-  target: "/home/sandbox/.claude"
+  target: "/opt/claude-config"
 YAML
 set +e
 output_all="$(HOME="${tmpdir}/fakehome" PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
@@ -3516,7 +3517,7 @@ exit_code=$?
 set -e
 assert_exit_code 0 "${exit_code}" "host_agent_config with tilde source exits code 0"
 docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
-assert_contains "${docker_run_line}" "-v ${tmpdir}/fakehome/.claude:/home/sandbox/.claude" "tilde expansion works in host_agent_config.source"
+assert_contains "${docker_run_line}" "-v ${tmpdir}/fakehome/.claude:/opt/claude-config" "tilde expansion works in host_agent_config.source"
 rm -rf "${tmpdir}"
 
 # Test: relative target path produces error
@@ -3549,7 +3550,7 @@ sdks:
   nodejs: "22"
 host_agent_config:
   source: "${tmpdir}/fake-claude"
-  target: "/home/sandbox/.claude"
+  target: "/opt/claude-config"
 YAML
 set +e
 output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"

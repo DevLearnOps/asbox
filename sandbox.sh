@@ -528,6 +528,10 @@ cmd_run() {
       die "host_agent_config source directory not found: ${hac_src}" 1
     fi
     run_flags+=("-v" "${hac_src}:${CFG_HOST_AGENT_CONFIG_TARGET}")
+    # Tell Claude Code CLI to use the mounted config directory
+    if [[ "${CFG_AGENT}" == "claude-code" ]]; then
+      run_flags+=("-e" "CLAUDE_CONFIG_DIR=${CFG_HOST_AGENT_CONFIG_TARGET}")
+    fi
     # Pass host UID/GID for cross-platform permission alignment
     run_flags+=("-e" "HOST_UID=$(id -u)" "-e" "HOST_GID=$(id -g)")
   fi

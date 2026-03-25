@@ -91,7 +91,7 @@ development_status:
   # Epic 7: Sandbox Runtime Hardening (sprint change proposal 2026-03-25)
   epic-7: in-progress
   7-1-fix-playwright-system-dependencies: done
-  7-2-fix-docker-compose-plugin-registration: review
+  7-2-fix-docker-compose-plugin-registration: done
   7-3-migrate-claude-cli-to-official-install-script: backlog
-  7-4-investigate-fix-host-agent-config-mount: backlog
+  7-4-investigate-fix-host-agent-config-mount: done
   epic-7-retrospective: optional

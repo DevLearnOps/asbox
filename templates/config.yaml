@@ -8,8 +8,8 @@ agent: claude-code
 # SDK versions to install (comment out to skip)
 sdks:
   nodejs: "22"
+  # go: "1.26.0"
   # python: "3.12"
-  # go: "1.22"
 
 # Additional system packages to install
 packages:
@@ -18,11 +18,12 @@ packages:
   - wget
   - git
   - jq
+  - yq
 
 # Host directories to mount into the sandbox
-# mounts:
-#   - source: "."
-#     target: "/workspace"
+mounts:
+  - source: ".."
+    target: "/workspace"
 
 # Secret names resolved from host environment variables at runtime
 # secrets:
@@ -41,9 +42,11 @@ packages:
 # WARNING: This is a read-write mount. The sandboxed agent can modify
 # your host config (settings, tokens, conversation history).
 # This is required for OAuth token refresh to stay synchronized.
+# Mount target should be OUTSIDE /home/sandbox to avoid chown conflicts.
+# The CLAUDE_CONFIG_DIR env var is set automatically for claude-code.
 # Defaults by agent:
-#   claude-code: source: "~/.claude", target: "/home/sandbox/.claude"
-#   gemini-cli:  source: "~/.config/gemini", target: "/home/sandbox/.config/gemini"
+#   claude-code: source: "~/.claude", target: "/opt/claude-config"
+#   gemini-cli:  source: "~/.config/gemini", target: "/opt/gemini-config"
 # host_agent_config:
 #   source: "~/.claude"
-#   target: "/home/sandbox/.claude"
+#   target: "/opt/claude-config"
