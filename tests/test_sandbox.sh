@@ -3636,8 +3636,12 @@ assert_exit_code 0 "${exit_code}" "7.1: build without MCP exits code 0"
 dockerfile_no_mcp="$(cat "${PROJECT_ROOT}/.sandbox-dockerfile")"
 
 assert_not_contains "${dockerfile_no_mcp}" "playwright install" "7.1: no playwright install without mcp config"
+assert_not_contains "${dockerfile_no_mcp}" "chown" "7.1: no chown playwright-browsers without mcp config"
 
 rm -rf "${tmpdir}"
+
+# Test 7.1-4: Browsers directory is chowned to sandbox user (AC #3)
+assert_contains "${dockerfile_content}" "chown -R sandbox:sandbox /opt/playwright-browsers" "7.1: Dockerfile chowns browsers dir to sandbox user"
 
 # ============================================================================
 # Story 7.2: Fix Docker Compose Plugin Registration for Podman

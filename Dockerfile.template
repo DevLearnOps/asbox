@@ -75,7 +75,9 @@ RUN npm install -g @google/gemini-cli
 
 # {{IF_MCP_PLAYWRIGHT}}
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers
-RUN npm install -g @playwright/mcp@{{MCP_PLAYWRIGHT_VERSION}} && npx playwright install --with-deps chromium
+ENV PLAYWRIGHT_MCP_BROWSER=chromium
+RUN npm install -g @playwright/mcp@{{MCP_PLAYWRIGHT_VERSION}} && \
+    npx -p @playwright/mcp@{{MCP_PLAYWRIGHT_VERSION}} playwright install --with-deps chromium
 # {{/IF_MCP_PLAYWRIGHT}}
 
 # MCP server manifest
@@ -88,6 +90,11 @@ RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/git
 
 # Non-root user for rootless operation
 RUN useradd -m -s /bin/bash sandbox
+
+# {{IF_MCP_PLAYWRIGHT}}
+RUN chown -R sandbox:sandbox /opt/playwright-browsers && \
+    chmod -R g+w /opt/playwright-browsers
+# {{/IF_MCP_PLAYWRIGHT}}
 
 # {{IF_AGENT_CLAUDE}}
 ENV PATH="/home/sandbox/.local/bin:${PATH}"

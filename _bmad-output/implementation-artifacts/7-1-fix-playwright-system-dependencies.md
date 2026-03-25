@@ -1,6 +1,6 @@
 # Story 7.1: Fix Playwright System Dependencies
 
-Status: review
+Status: done
 
 ## Story
 
@@ -12,6 +12,7 @@ So that the agent can run browser-based E2E tests without missing library errors
 
 1. **Given** a sandbox image is built with `mcp: [playwright]` configured, **When** the agent runs Playwright tests inside the sandbox, **Then** the browser launches without missing library errors.
 2. **Given** the Dockerfile.template Playwright block, **When** `npx playwright install --with-deps chromium` runs at build time, **Then** all required system libraries are present (libnspr4, libnss3, libatk1.0-0t64, libatk-bridge2.0-0t64, libdbus-1-3, libcups2t64, libxcb1, libxkbcommon0, libatspi2.0-0t64, libx11-6, libxcomposite1, libxdamage1, libxext6, libxfixes3, libxrandr2, libgbm1, libcairo2, libpango-1.0-0, libasound2t64).
+3. **Given** a project with its own `@playwright/test` dependency (potentially a different Playwright version than the pre-installed MCP), **When** the sandbox user runs `npx playwright install chromium` at runtime, **Then** the browser installs successfully because `/opt/playwright-browsers` is owned by the sandbox user.
 
 ## Tasks / Subtasks
 
@@ -32,6 +33,15 @@ So that the agent can run browser-based E2E tests without missing library errors
   - [x] Test: Dockerfile generated with `mcp: [playwright]` contains the Playwright system dependency packages
   - [x] Test: System deps are installed before `npx playwright install` in the generated Dockerfile
   - [x] Test: No Playwright system deps when MCP not configured
+- [x] Task 5: Make browsers directory writable by sandbox user for runtime installs (AC: #3)
+  - [x] Add `chown -R sandbox:sandbox /opt/playwright-browsers` after `useradd sandbox` inside a second `IF_MCP_PLAYWRIGHT` conditional block
+  - [x] Add test: Dockerfile contains `chown` of browsers directory when Playwright MCP is configured
+  - [x] Add test: No `chown` of browsers directory when MCP not configured
+- [x] Task 6: Fix runtime UID remapping breaking browser dir permissions (AC: #3)
+  - [x] Diagnose: sandbox user UID remapped by entrypoint.sh (HOST_UID) but /opt/playwright-browsers still owned by build-time UID
+  - [x] Fix entrypoint.sh: chown /opt/playwright-browsers after UID/GID remapping alongside /home/sandbox
+  - [x] Fix Dockerfile.template: add `chmod -R g+w` to browsers dir for group-write as safety net
+  - [x] Add integration test: MCP Playwright can navigate after UID remapping
 
 ## Dev Notes
 
@@ -121,7 +131,7 @@ Test naming convention: `7.1: <description>`
 - Do NOT add system deps outside the `IF_MCP_PLAYWRIGHT` block -- they should only be installed when Playwright is configured
 - Do NOT merge the system deps `apt-get` with the common CLI tools `apt-get` (line 10-18) -- keep Playwright deps conditional
 - Do NOT modify `sandbox.sh` -- this story is entirely about `Dockerfile.template` changes
-- Do NOT modify `scripts/entrypoint.sh` -- not relevant to this story
+- ~~Do NOT modify `scripts/entrypoint.sh`~~ -- Now relevant: Task 6 fixes UID remapping breaking browser dir permissions
 - Do NOT hardcode the package list without verifying via `ldd` first -- the sprint proposal list is a starting point, not a guarantee
 
 ### Previous Story Intelligence
@@ -179,12 +189,17 @@ Claude Opus 4.6 (1M context)
 - Built and verified image: no missing libraries via `ldd` check
 - Added 25 new test assertions (19 package presence + 1 ordering + 1 build success + 3 absence checks + 1 no-mcp build success)
 - Full test suite: 482/482 passed, 0 failed — no regressions
+- Task 5: Added `chown -R sandbox:sandbox /opt/playwright-browsers` in a second `IF_MCP_PLAYWRIGHT` block after `useradd sandbox` — enables sandbox user to install additional browser revisions at runtime (e.g., when a project pins a different `@playwright/test` version than the pre-installed MCP)
+- Task 5: The second conditional block reuses the same `IF_MCP_PLAYWRIGHT` markers — sandbox.sh's sed processes all occurrences
 
 ### File List
 
-- `Dockerfile.template` — Added explicit system library apt-get install inside IF_MCP_PLAYWRIGHT block (lines 77-82)
-- `tests/test_sandbox.sh` — Added Story 7.1 test section (25 assertions: package presence, ordering, and absence)
+- `Dockerfile.template` — Added explicit system library apt-get install inside IF_MCP_PLAYWRIGHT block; added chown of browsers dir after useradd in second IF_MCP_PLAYWRIGHT block; added `chmod -R g+w` for group-write safety net
+- `scripts/entrypoint.sh` — Added chown of /opt/playwright-browsers after UID/GID remapping (Task 6)
+- `tests/test_sandbox.sh` — Added Story 7.1 test section (assertions: package presence, ordering, absence, and browsers dir ownership)
 
 ### Change Log
 
 - 2026-03-25: Implemented Story 7.1 — Added explicit Playwright system dependency installation to Dockerfile.template and corresponding tests
+- 2026-03-25: Task 6 verified — MCP Playwright navigated to https://example.com successfully from inside the sandbox, confirming system deps, browser launch, DNS, HTTPS, and UID remapping all work end-to-end.
+- 2026-03-25: Task 6 — Fixed runtime UID remapping breaking browser dir permissions. Root cause: entrypoint.sh remaps sandbox UID via HOST_UID but only chowns /home/sandbox, leaving /opt/playwright-browsers owned by build-time UID (1001). MCP server fails with EACCES when creating Chrome user profile. Fix: chown browsers dir in entrypoint.sh after UID change + chmod g+w in Dockerfile as safety net. Also discovered: project-level `@playwright/test` installs may use a different browser revision than the pre-installed MCP browsers — `PLAYWRIGHT_BROWSERS_PATH` env var forces all Playwright instances to use /opt/playwright-browsers, so projects with mismatched versions must clear the env var for their test runs.

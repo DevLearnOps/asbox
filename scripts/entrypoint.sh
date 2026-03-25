@@ -39,6 +39,8 @@ if [[ "$(id -u)" == "0" ]]; then
   # Fix ownership of home dir contents after UID/GID change (excludes bind mounts outside /home)
   if [[ "${uid_changed}" == "true" || "${gid_changed}" == "true" ]]; then
     chown -R sandbox:sandbox /home/sandbox
+    # Fix Playwright browsers dir so MCP server and project installs can write to it
+    [[ -d /opt/playwright-browsers ]] && chown -R sandbox:sandbox /opt/playwright-browsers
   fi
 
   # Ensure XDG_RUNTIME_DIR exists for the sandbox user (must run as root since /run/user is root-owned)

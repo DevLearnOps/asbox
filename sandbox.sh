@@ -388,7 +388,7 @@ process_template() {
   local mcp_manifest='{"mcpServers": {}}'
   if [[ -n "${has_mcp_playwright}" ]]; then
     local mcp_playwright_version="0.0.68"
-    mcp_manifest='{"mcpServers": {"playwright": {"type": "stdio", "command": "npx", "args": ["-y", "@playwright/mcp"]}}}'
+    mcp_manifest='{"mcpServers": {"playwright": {"type": "stdio", "command": "npx", "args": ["-y", "@playwright/mcp", "--browser", "chromium", "--headless"]}}}'
     safe_val="$(sed_escape_replacement "${mcp_playwright_version}")"
     template="$(echo "${template}" | sed "s|{{MCP_PLAYWRIGHT_VERSION}}|${safe_val}|g")"
   fi
