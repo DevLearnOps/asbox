@@ -310,6 +310,17 @@ process_template() {
     template="$(echo "${template}" | sed '/^# {{IF_GO}}$/,/^# {{\/IF_GO}}$/d')"
   fi
 
+  # IF_MCP_PLAYWRIGHT
+  local has_mcp_playwright=""
+  for _mcp in "${CFG_MCP[@]:-}"; do
+    if [[ "${_mcp}" == "playwright" ]]; then has_mcp_playwright="yes"; break; fi
+  done
+  if [[ -n "${has_mcp_playwright}" ]]; then
+    template="$(echo "${template}" | sed '/^# {{IF_MCP_PLAYWRIGHT}}$/d; /^# {{\/IF_MCP_PLAYWRIGHT}}$/d')"
+  else
+    template="$(echo "${template}" | sed '/^# {{IF_MCP_PLAYWRIGHT}}$/,/^# {{\/IF_MCP_PLAYWRIGHT}}$/d')"
+  fi
+
   # Step 3: Substitute value placeholders
   local safe_val
 
@@ -351,6 +362,17 @@ process_template() {
     template="$(echo "${template}" | sed '/{{PACKAGES}}/d')"
   fi
 
+  # Generate MCP manifest JSON and substitute MCP version placeholders
+  local mcp_manifest='{"mcpServers": {}}'
+  if [[ -n "${has_mcp_playwright}" ]]; then
+    local mcp_playwright_version="0.0.68"
+    mcp_manifest='{"mcpServers": {"playwright": {"type": "stdio", "command": "npx", "args": ["-y", "@playwright/mcp"]}}}'
+    safe_val="$(sed_escape_replacement "${mcp_playwright_version}")"
+    template="$(echo "${template}" | sed "s|{{MCP_PLAYWRIGHT_VERSION}}|${safe_val}|g")"
+  fi
+  safe_val="$(sed_escape_replacement "${mcp_manifest}")"
+  template="$(echo "${template}" | sed "s|{{MCP_MANIFEST_JSON}}|${safe_val}|g")"
+
   # Step 4: Validate no unresolved placeholders remain
   local unresolved
   unresolved="$(echo "${template}" | grep -oE '\{\{/?[A-Z_]+\}\}' | head -1 || true)"
@@ -363,6 +385,20 @@ process_template() {
 
 cmd_build() {
   parse_config
+
+  # Validate MCP dependencies
+  local _mcp
+  local _known_mcp_servers="playwright"
+  for _mcp in "${CFG_MCP[@]:-}"; do
+    [[ -z "${_mcp}" ]] && continue
+    if ! echo "${_known_mcp_servers}" | grep -qw "${_mcp}"; then
+      die "unknown mcp server '${_mcp}' (known: ${_known_mcp_servers})" 1
+    fi
+    if [[ "${_mcp}" == "playwright" && -z "${CFG_SDK_NODEJS}" ]]; then
+      die "mcp server 'playwright' requires sdks.nodejs to be configured" 1
+    fi
+  done
+
   process_template
 
   local dockerfile_path

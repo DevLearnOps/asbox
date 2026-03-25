@@ -531,9 +531,10 @@ rm -rf "${tmpdir}"
 tmpdir="$(mktemp -d)"
 cat > "${tmpdir}/config.yaml" <<'YAML'
 agent: claude-code
+sdks:
+  nodejs: "22"
 mcp:
   - playwright
-  - filesystem
 YAML
 set +e
 output_all="$(PATH="${BUILD_PATH}" bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
@@ -2830,6 +2831,135 @@ assert_not_contains "${dockerfile_content}" "chown sandbox:sandbox /usr/local/bi
 # Test 4.3-3.2: sandbox user created with correct shell and home dir
 assert_contains "${dockerfile_content}" "useradd -m -s /bin/bash sandbox" "4.3: sandbox user created with home dir and bash shell"
 
+
+rm -rf "${tmpdir}"
+
+# ============================================================================
+# Story 5.1: MCP Server Installation at Build Time
+# ============================================================================
+
+echo "# Story 5.1: MCP server installation at build time"
+
+# Task 1 & 2: Playwright block present when mcp: [playwright] configured (AC #1)
+
+rm -f "${PROJECT_ROOT}/.sandbox-dockerfile"
+tmpdir="$(mktemp -d)"
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+sdks:
+  nodejs: "22"
+mcp:
+  - playwright
+YAML
+set +e
+output_all="$(PATH="${BUILD_PATH}" bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "5.1: build with mcp playwright exits code 0"
+
+dockerfile_content="$(cat "${PROJECT_ROOT}/.sandbox-dockerfile")"
+
+# Test 5.1-1.1: @playwright/mcp is installed
+assert_contains "${dockerfile_content}" "@playwright/mcp" "5.1: Dockerfile installs @playwright/mcp package"
+
+# Test 5.1-1.2: Playwright browser dependencies installed
+assert_contains "${dockerfile_content}" "playwright install --with-deps chromium" "5.1: Dockerfile installs Playwright browser dependencies"
+
+# Test 5.1-1.3: npm install used for global install with version pin
+assert_contains "${dockerfile_content}" "npm install -g @playwright/mcp@" "5.1: Dockerfile uses npm install -g with version pin for Playwright MCP"
+
+# Test 5.1-1.5: PLAYWRIGHT_BROWSERS_PATH set for shared browser access
+assert_contains "${dockerfile_content}" "PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers" "5.1: Dockerfile sets PLAYWRIGHT_BROWSERS_PATH for sandbox user access"
+
+# Test 5.1-1.4: No IF_MCP_PLAYWRIGHT tags remain
+assert_not_contains "${dockerfile_content}" "IF_MCP_PLAYWRIGHT" "5.1: no IF_MCP_PLAYWRIGHT tags remain in resolved Dockerfile"
+
+# Test 5.1-3.1: Manifest file creation directive present (AC #2)
+assert_contains "${dockerfile_content}" "mcp-servers.json" "5.1: Dockerfile creates MCP manifest file"
+
+# Test 5.1-3.2: Manifest contains playwright server entry with correct structure
+assert_contains "${dockerfile_content}" '"playwright"' "5.1: manifest contains playwright server entry"
+assert_contains "${dockerfile_content}" '"type": "stdio"' "5.1: manifest has stdio type for playwright"
+assert_contains "${dockerfile_content}" '"command": "npx"' "5.1: manifest has npx command for playwright"
+assert_contains "${dockerfile_content}" '@playwright/mcp' "5.1: manifest references @playwright/mcp package"
+
+# Test 5.1-3.3: MCP block comes before useradd (root ownership)
+mcp_line="$(echo "${dockerfile_content}" | grep -n "@playwright/mcp" | head -1 | cut -d: -f1)"
+user_line="$(echo "${dockerfile_content}" | grep -n "useradd.*sandbox" | head -1 | cut -d: -f1)"
+if [[ -n "${mcp_line}" && -n "${user_line}" && "${mcp_line}" -lt "${user_line}" ]]; then
+  pass "5.1: MCP installation before sandbox user created"
+else
+  fail "5.1: MCP installation before sandbox user created" "mcp_line=${mcp_line} user_line=${user_line}"
+fi
+
+rm -rf "${tmpdir}"
+
+# Task 2: Playwright block absent when no MCP configured (AC #3)
+
+rm -f "${PROJECT_ROOT}/.sandbox-dockerfile"
+tmpdir="$(mktemp -d)"
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+sdks:
+  nodejs: "22"
+YAML
+set +e
+output_all="$(PATH="${BUILD_PATH}" bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "5.1: build without MCP exits code 0"
+
+dockerfile_no_mcp="$(cat "${PROJECT_ROOT}/.sandbox-dockerfile")"
+
+# Test 5.1-2.1: No playwright install when MCP not configured
+assert_not_contains "${dockerfile_no_mcp}" "@playwright/mcp" "5.1: no @playwright/mcp without mcp config"
+
+# Test 5.1-2.2: No playwright browser install
+assert_not_contains "${dockerfile_no_mcp}" "playwright install" "5.1: no playwright browser install without mcp config"
+
+# Test 5.1-3.4: Empty manifest when no MCP configured (AC #3)
+assert_contains "${dockerfile_no_mcp}" '{"mcpServers": {}}' "5.1: empty manifest when no MCP configured"
+
+# Test 5.1-3.5: Manifest is always created even without MCP
+assert_contains "${dockerfile_no_mcp}" "mcp-servers.json" "5.1: manifest file always created even without MCP"
+
+rm -rf "${tmpdir}"
+
+# Task 4: Node.js dependency validation for Playwright (AC #1)
+
+rm -f "${PROJECT_ROOT}/.sandbox-dockerfile"
+tmpdir="$(mktemp -d)"
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+mcp:
+  - playwright
+YAML
+set +e
+output_all="$(PATH="${BUILD_PATH}" bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 1 "${exit_code}" "5.1: playwright without nodejs SDK fails with exit 1"
+assert_contains "${output_all}" "requires sdks.nodejs" "5.1: error message mentions nodejs requirement"
+
+rm -rf "${tmpdir}"
+
+# Task 4b: Unknown MCP server name rejected (P2)
+
+rm -f "${PROJECT_ROOT}/.sandbox-dockerfile"
+tmpdir="$(mktemp -d)"
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+sdks:
+  nodejs: "22"
+mcp:
+  - filesystem
+YAML
+set +e
+output_all="$(PATH="${BUILD_PATH}" bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 1 "${exit_code}" "5.1: unknown MCP server fails with exit 1"
+assert_contains "${output_all}" "unknown mcp server" "5.1: error message mentions unknown mcp server"
 
 rm -rf "${tmpdir}"
 
