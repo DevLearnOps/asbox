@@ -76,6 +76,9 @@ if command -v podman >/dev/null 2>&1; then
     fi
     sleep 0.5
   done
+
+  # Start healthcheck poller (no systemd = no automatic healthcheck timers)
+  /usr/local/bin/healthcheck-poller.sh &
 fi
 
 # Generate .mcp.json from build-time manifest
