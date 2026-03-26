@@ -800,7 +800,7 @@ assert_exit_code 0 "${exit_code}" "template with all SDKs exits code 0"
 dockerfile_content="$(cat "${PROJECT_ROOT}/.sandbox-dockerfile")"
 assert_contains "${dockerfile_content}" "setup_20.x" "all SDKs: Node.js 20 install present"
 assert_contains "${dockerfile_content}" "python3.11" "all SDKs: Python 3.11 install present"
-assert_contains "${dockerfile_content}" "go1.22.linux-amd64" "all SDKs: Go 1.22 install present"
+assert_contains "${dockerfile_content}" "go1.22.linux-\${ARCH}" "all SDKs: Go 1.22 install present"
 assert_contains "${dockerfile_content}" "docker-compose" "all SDKs: docker-compose binary still present alongside Python SDK"
 assert_not_contains "${dockerfile_content}" "IF_" "all SDKs: no conditional tags remain"
 rm -rf "${tmpdir}"
@@ -3636,7 +3636,7 @@ assert_exit_code 0 "${exit_code}" "7.1: build without MCP exits code 0"
 dockerfile_no_mcp="$(cat "${PROJECT_ROOT}/.sandbox-dockerfile")"
 
 assert_not_contains "${dockerfile_no_mcp}" "playwright install" "7.1: no playwright install without mcp config"
-assert_not_contains "${dockerfile_no_mcp}" "chown" "7.1: no chown playwright-browsers without mcp config"
+assert_not_contains "${dockerfile_no_mcp}" "chown -R sandbox:sandbox /opt/playwright-browsers" "7.1: no chown playwright-browsers without mcp config"
 
 rm -rf "${tmpdir}"
 
