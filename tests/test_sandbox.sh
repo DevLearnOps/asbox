@@ -3684,6 +3684,185 @@ fi
 rm -rf "${tmpdir}"
 
 # ============================================================================
+# Story 8.1: Auto dependency isolation via named volumes
+# ============================================================================
+
+echo "# Story 8.1: Auto dependency isolation via named volumes"
+
+# Test 8.1.1: auto_isolate_deps: true with single package.json at mount root
+# Verify -v sandbox-<project>-node_modules:<target>/node_modules flag generated
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin" "${tmpdir}/project"
+setup_build_mock "${tmpdir}/mockbin" 0
+# Create a package.json at the project root
+echo '{}' > "${tmpdir}/project/package.json"
+cat > "${tmpdir}/config.yaml" <<YAML
+agent: claude-code
+sdks:
+  nodejs: "22"
+auto_isolate_deps: true
+mounts:
+  - source: "${tmpdir}/project"
+    target: "/workspace"
+YAML
+set +e
+output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "8.1.1: auto_isolate_deps run exits code 0"
+docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
+assert_contains "${docker_run_line}" "sandbox-" "8.1.1: volume name has sandbox- prefix"
+assert_contains "${docker_run_line}" "-node_modules:/workspace/node_modules" "8.1.1: volume name convention and target"
+assert_contains "${output_all}" "isolating: /workspace/node_modules (volume: sandbox-" "8.1.1: logs full isolation message with volume name"
+rm -rf "${tmpdir}"
+
+# Test 8.1.2: monorepo with multiple package.json files
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin" "${tmpdir}/project/packages/api" "${tmpdir}/project/packages/web"
+setup_build_mock "${tmpdir}/mockbin" 0
+echo '{}' > "${tmpdir}/project/package.json"
+echo '{}' > "${tmpdir}/project/packages/api/package.json"
+echo '{}' > "${tmpdir}/project/packages/web/package.json"
+cat > "${tmpdir}/config.yaml" <<YAML
+agent: claude-code
+sdks:
+  nodejs: "22"
+auto_isolate_deps: true
+mounts:
+  - source: "${tmpdir}/project"
+    target: "/workspace"
+YAML
+set +e
+output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "8.1.2: monorepo run exits code 0"
+docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
+assert_contains "${docker_run_line}" "sandbox-" "8.1.2: volume names have sandbox- prefix"
+assert_contains "${docker_run_line}" "-node_modules:/workspace/node_modules" "8.1.2: root volume name convention"
+assert_contains "${docker_run_line}" "-packages-api-node_modules:/workspace/packages/api/node_modules" "8.1.2: packages/api volume name convention"
+assert_contains "${docker_run_line}" "-packages-web-node_modules:/workspace/packages/web/node_modules" "8.1.2: packages/web volume name convention"
+assert_contains "${output_all}" "isolating: /workspace/node_modules" "8.1.2: logs root isolation"
+assert_contains "${output_all}" "isolating: /workspace/packages/api/node_modules" "8.1.2: logs api isolation"
+assert_contains "${output_all}" "isolating: /workspace/packages/web/node_modules" "8.1.2: logs web isolation"
+rm -rf "${tmpdir}"
+
+# Test 8.1.3: auto_isolate_deps absent from config — no volume flags, no output
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin" "${tmpdir}/project"
+setup_build_mock "${tmpdir}/mockbin" 0
+echo '{}' > "${tmpdir}/project/package.json"
+cat > "${tmpdir}/config.yaml" <<YAML
+agent: claude-code
+sdks:
+  nodejs: "22"
+mounts:
+  - source: "${tmpdir}/project"
+    target: "/workspace"
+YAML
+set +e
+output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "8.1.3: absent auto_isolate_deps exits code 0"
+docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
+assert_not_contains "${docker_run_line}" "node_modules" "8.1.3: no node_modules volume when absent"
+assert_not_contains "${output_all}" "isolating:" "8.1.3: no isolation output when absent"
+rm -rf "${tmpdir}"
+
+# Test 8.1.4: auto_isolate_deps: false — no scanning
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin" "${tmpdir}/project"
+setup_build_mock "${tmpdir}/mockbin" 0
+echo '{}' > "${tmpdir}/project/package.json"
+cat > "${tmpdir}/config.yaml" <<YAML
+agent: claude-code
+sdks:
+  nodejs: "22"
+auto_isolate_deps: false
+mounts:
+  - source: "${tmpdir}/project"
+    target: "/workspace"
+YAML
+set +e
+output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "8.1.4: false auto_isolate_deps exits code 0"
+docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
+assert_not_contains "${docker_run_line}" "node_modules" "8.1.4: no node_modules volume when false"
+assert_not_contains "${output_all}" "isolating:" "8.1.4: no isolation output when false"
+rm -rf "${tmpdir}"
+
+# Test 8.1.5: no package.json files in mount — silent return
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin" "${tmpdir}/project"
+setup_build_mock "${tmpdir}/mockbin" 0
+cat > "${tmpdir}/config.yaml" <<YAML
+agent: claude-code
+sdks:
+  nodejs: "22"
+auto_isolate_deps: true
+mounts:
+  - source: "${tmpdir}/project"
+    target: "/workspace"
+YAML
+set +e
+output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "8.1.5: no package.json exits code 0"
+docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
+assert_not_contains "${docker_run_line}" "node_modules" "8.1.5: no volume flags when no package.json"
+assert_not_contains "${output_all}" "isolating:" "8.1.5: no output when no package.json"
+rm -rf "${tmpdir}"
+
+# Test 8.1.6: volume naming with nested paths (slashes become dashes)
+tmpdir="$(mktemp -d)"
+mkdir -p "${tmpdir}/mockbin" "${tmpdir}/project/packages/api"
+setup_build_mock "${tmpdir}/mockbin" 0
+echo '{}' > "${tmpdir}/project/packages/api/package.json"
+cat > "${tmpdir}/config.yaml" <<YAML
+agent: claude-code
+sdks:
+  nodejs: "22"
+auto_isolate_deps: true
+mounts:
+  - source: "${tmpdir}/project"
+    target: "/workspace"
+YAML
+set +e
+output_all="$(PATH="${tmpdir}/mockbin:${PATH}" bash "${SANDBOX}" run -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "8.1.6: nested path exits code 0"
+docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
+assert_contains "${docker_run_line}" "packages-api-node_modules" "8.1.6: nested path uses dashes in volume name"
+rm -rf "${tmpdir}"
+
+# Test 8.1.7: config parsing extracts auto_isolate_deps correctly (true, false, absent)
+# This is covered implicitly by tests 8.1.1 (true), 8.1.4 (false), and 8.1.3 (absent)
+# but let's verify build still works with the new config field
+tmpdir="$(mktemp -d)"
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+sdks:
+  nodejs: "22"
+auto_isolate_deps: true
+YAML
+set +e
+output_all="$(PATH="${BUILD_PATH}" bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
+exit_code=$?
+set -e
+assert_exit_code 0 "${exit_code}" "8.1.7: config with auto_isolate_deps: true builds successfully"
+rm -rf "${tmpdir}"
+
+# Test: config template includes commented-out auto_isolate_deps
+config_template="$(cat "${PROJECT_ROOT}/templates/config.yaml")"
+assert_contains "${config_template}" "auto_isolate_deps" "8.1: config template contains auto_isolate_deps option"
+assert_contains "${config_template}" "# auto_isolate_deps: true" "8.1: auto_isolate_deps is commented out in template"
+
+# ============================================================================
 # Summary
 # ============================================================================
 

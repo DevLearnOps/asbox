@@ -82,6 +82,9 @@ CFG_ENV_KEYS=()
 CFG_ENV_VALUES=()
 CFG_HOST_AGENT_CONFIG_SOURCE=""
 CFG_HOST_AGENT_CONFIG_TARGET=""
+CFG_AUTO_ISOLATE_DEPS=""
+CFG_PROJECT_NAME=""
+ISOLATE_VOLUME_FLAGS=()
 RESOLVED_DOCKERFILE=""
 CONTENT_HASH=""
 IMAGE_TAG=""
@@ -184,6 +187,22 @@ parse_config() {
   if [[ "${CFG_HOST_AGENT_CONFIG_SOURCE}" == "null" ]]; then CFG_HOST_AGENT_CONFIG_SOURCE=""; fi
   CFG_HOST_AGENT_CONFIG_TARGET="$(yq eval '.host_agent_config.target // ""' "${CONFIG_PATH}")"
   if [[ "${CFG_HOST_AGENT_CONFIG_TARGET}" == "null" ]]; then CFG_HOST_AGENT_CONFIG_TARGET=""; fi
+
+  # Extract auto_isolate_deps (optional boolean)
+  CFG_AUTO_ISOLATE_DEPS="$(yq eval '.auto_isolate_deps // ""' "${CONFIG_PATH}")"
+  if [[ "${CFG_AUTO_ISOLATE_DEPS}" == "null" ]]; then CFG_AUTO_ISOLATE_DEPS=""; fi
+
+  # Extract or derive project name for volume naming
+  CFG_PROJECT_NAME="$(yq eval '.project_name // ""' "${CONFIG_PATH}")"
+  if [[ "${CFG_PROJECT_NAME}" == "null" || -z "${CFG_PROJECT_NAME}" ]]; then
+    # Fall back to parent directory name of config file
+    local _config_dir
+    _config_dir="$(cd "$(dirname "${CONFIG_PATH}")" && pwd)"
+    CFG_PROJECT_NAME="$(basename "$(cd "${_config_dir}/.." && pwd)" 2>/dev/null)" || CFG_PROJECT_NAME="sandbox"
+  fi
+  # Sanitize: lowercase, replace non-alphanumeric with dashes
+  CFG_PROJECT_NAME="$(echo "${CFG_PROJECT_NAME}" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/--*/-/g; s/^-//; s/-$//')"
+  if [[ -z "${CFG_PROJECT_NAME}" ]]; then CFG_PROJECT_NAME="sandbox"; fi
 }
 
 # ============================================================================
@@ -203,6 +222,104 @@ validate_secrets() {
     if [[ -z "${_check}" ]]; then
       die "secret not set: ${secret_name}" 4
     fi
+  done
+}
+
+# ============================================================================
+# Dependency isolation
+# ============================================================================
+
+# Scan mounted project paths for package.json files and populate
+# ISOLATE_VOLUME_FLAGS with named volume mounts for each node_modules directory.
+detect_isolate_deps() {
+  ISOLATE_VOLUME_FLAGS=()
+
+  if [[ "${CFG_AUTO_ISOLATE_DEPS}" != "true" ]]; then
+    return 0
+  fi
+
+  local config_dir
+  config_dir="$(cd "$(dirname "${CONFIG_PATH}")" && pwd)"
+
+  # Track container targets to deduplicate overlapping mounts
+  local seen_targets=()
+
+  local i
+  for i in "${!CFG_MOUNT_SOURCES[@]}"; do
+    local src="${CFG_MOUNT_SOURCES[$i]}"
+    local tgt="${CFG_MOUNT_TARGETS[$i]}"
+
+    # Resolve source path (same logic as cmd_run)
+    if [[ "${src}" == "~/"* ]]; then
+      src="${HOME}/${src#\~/}"
+    elif [[ "${src}" != /* ]]; then
+      src="$(cd "${config_dir}/${src}" && pwd 2>/dev/null)" || continue
+    fi
+
+    # Guard: skip if source directory doesn't exist
+    if [[ ! -d "${src}" ]]; then
+      continue
+    fi
+
+    # Find package.json files, excluding node_modules directories and symlinks
+    local pkg_files=()
+    while IFS= read -r line; do
+      [[ -n "${line}" ]] && pkg_files+=("${line}")
+    done < <(find -H "${src}" -name package.json -not -path '*/node_modules/*' -not -type l 2>/dev/null)
+
+    local pkg_file
+    for pkg_file in "${pkg_files[@]}"; do
+      local pkg_dir
+      pkg_dir="$(dirname "${pkg_file}")"
+
+      # Compute relative path from mount source
+      local rel_dir
+      if [[ "${pkg_dir}" == "${src}" ]]; then
+        rel_dir=""
+      else
+        rel_dir="${pkg_dir#"${src}"/}"
+      fi
+
+      # Guard: skip if rel_dir is still absolute (symlink outside mount tree)
+      if [[ "${rel_dir}" == /* ]]; then
+        continue
+      fi
+
+      # Build container target path for node_modules
+      local container_nm
+      if [[ -z "${rel_dir}" ]]; then
+        container_nm="${tgt}/node_modules"
+      else
+        container_nm="${tgt}/${rel_dir}/node_modules"
+      fi
+
+      # Deduplicate by container target
+      local already_seen=""
+      local seen
+      for seen in "${seen_targets[@]:-}"; do
+        if [[ "${seen}" == "${container_nm}" ]]; then
+          already_seen="yes"
+          break
+        fi
+      done
+      if [[ -n "${already_seen}" ]]; then
+        continue
+      fi
+      seen_targets+=("${container_nm}")
+
+      # Build volume name: sandbox-<project>-<relative-path-dashed>-node_modules
+      local vol_name
+      if [[ -z "${rel_dir}" ]]; then
+        vol_name="sandbox-${CFG_PROJECT_NAME}-node_modules"
+      else
+        local rel_dashed
+        rel_dashed="$(echo "${rel_dir}" | sed 's/[^a-zA-Z0-9]/-/g' | sed 's/--*/-/g; s/^-//; s/-$//' | tr '[:upper:]' '[:lower:]')"
+        vol_name="sandbox-${CFG_PROJECT_NAME}-${rel_dashed}-node_modules"
+      fi
+
+      ISOLATE_VOLUME_FLAGS+=("-v" "${vol_name}:${container_nm}")
+      info "isolating: ${container_nm} (volume: ${vol_name})"
+    done
   done
 }
 
@@ -457,6 +574,7 @@ cmd_build() {
 cmd_run() {
   parse_config
   validate_secrets
+  detect_isolate_deps
   cmd_build
 
   # Assemble docker run flags using array (safe for paths with spaces)
@@ -498,7 +616,7 @@ cmd_run() {
     if [[ "${src}" == "~/"* ]]; then
       src="${HOME}/${src#\~/}"
     elif [[ "${src}" != /* ]]; then
-      src="$(cd "${config_dir}/${src}" && pwd)"
+      src="$(cd "${config_dir}/${src}" && pwd 2>/dev/null)" || die "mount source not found: ${CFG_MOUNT_SOURCES[$i]} (resolved: ${config_dir}/${CFG_MOUNT_SOURCES[$i]})" 1
     fi
 
     run_flags+=("-v" "${src}:${tgt}")
@@ -534,6 +652,11 @@ cmd_run() {
     fi
     # Pass host UID/GID for cross-platform permission alignment
     run_flags+=("-e" "HOST_UID=$(id -u)" "-e" "HOST_GID=$(id -g)")
+  fi
+
+  # Append dependency isolation volume flags (if any)
+  if [[ ${#ISOLATE_VOLUME_FLAGS[@]} -gt 0 ]]; then
+    run_flags+=("${ISOLATE_VOLUME_FLAGS[@]}")
   fi
 
   info "starting sandbox: ${IMAGE_TAG}"

@@ -16,6 +16,10 @@ stepsCompleted:
   - step-12-complete
 inputDocuments: []
 workflowType: 'prd'
+lastEdited: '2026-03-26'
+editHistory:
+  - date: '2026-03-26'
+    changes: 'Added auto_isolate_deps feature for anonymous volume mounts to prevent macOS/Linux dependency clashes'
 documentCounts:
   briefs: 0
   research: 0
@@ -102,9 +106,11 @@ Manuel launches a sandbox and kicks off an agent task, but when he comes back, t
 
 Manuel reads the error, realizes he needs to add `build-essential` to his sandbox configuration. He updates the build arguments, rebuilds the sandbox image, and relaunches. This time the agent completes the task successfully.
 
+In another scenario, Manuel launches a sandbox for a Node.js project he's been developing on macOS. The agent tries to run the app but crashes on a native module compiled for Darwin. Manuel adds `auto_isolate_deps: true` to his config and relaunches. The sandbox detects three `package.json` files (root, `packages/api`, `packages/web`), logs that it's isolating their `node_modules/` directories, and the agent runs `npm install` inside the sandbox to get Linux-native binaries. Everything works.
+
 In another scenario, the agent tries to `git push` to the remote. It gets "unauthorized" and moves on -- it logs the commit locally and notes in the chat that it couldn't push. Manuel sees this when he reviews and pushes manually from his host. No damage done.
 
-**Capabilities revealed:** Build argument configuration, sandbox image rebuild, agent error recovery behavior, git push boundary enforcement, clear failure messages at boundaries.
+**Capabilities revealed:** Build argument configuration, sandbox image rebuild, agent error recovery behavior, git push boundary enforcement, clear failure messages at boundaries, automatic dependency isolation for cross-platform compatibility.
 
 ### Journey 3: Manuel Sets Up a New Project's Sandbox (Builder/Maintainer)
 
@@ -142,6 +148,7 @@ At no point does the agent encounter the developer's SSH keys, cloud credentials
 | Sandbox image rebuild | 2, 3 | MVP |
 | Shareable configuration | 3 | MVP |
 | Standard error codes at boundaries | 2, 4 | MVP |
+| Auto dependency isolation (anonymous mounts) | 2 | MVP |
 
 ## Innovation & Novel Patterns
 
@@ -218,11 +225,16 @@ mcp:
 mounts:
   - source: .
     target: /workspace
+auto_isolate_deps: true
 secrets:
   - ANTHROPIC_API_KEY
 env:
   NODE_ENV: development
 ```
+
+When `auto_isolate_deps` is enabled, the sandbox scans all mounted project paths at launch for `package.json` files and creates anonymous Docker volume mounts over each sibling `node_modules/` directory. This prevents macOS-native compiled dependencies from clashing with the Linux sandbox environment. The scan is logged so the developer can see which directories were isolated.
+
+**Accepted edge case:** On a completely fresh project with no `package.json` files yet, the first sandbox launch will have no automatic mounts. This is acceptable because the agent will run `npm install` inside the Linux sandbox, producing Linux-native dependencies from the start -- no clash occurs.
 
 ### CLI Interface
 
@@ -271,6 +283,7 @@ env:
 - Secrets resolved from host environment variables and injected via `--env` flags (not written to filesystem)
 - Inner Docker available via rootless Docker, sysbox, or Podman (architecture decision deferred)
 - Private network bridge for inner container communication
+- When `auto_isolate_deps` is enabled: at launch, scan mounted paths for `package.json` files, derive `node_modules/` sibling paths, and add anonymous volume mounts (`-v <container-path>/node_modules`) to the `docker run` invocation. Log each discovered mount. On fresh projects with no `package.json`, no mounts are added -- the agent creates Linux-native dependencies from scratch.
 
 ### Installation & Distribution
 
@@ -288,6 +301,7 @@ env:
 - Content-hash-based image caching (config + template + sandbox files) for smart rebuild detection
 - Mount path resolution relative to config file location, not working directory
 - Clear error messages for missing dependencies, unset secrets, and invalid configuration
+- `auto_isolate_deps` scan: `find` for `package.json` files under mounted paths, derive sibling `node_modules` paths, assemble `-v` anonymous volume flags for `docker run`
 - Image naming convention: `sandbox-<project-name>:<content-hash>` for cache management
 
 ## Project Scoping & Phased Development
@@ -328,6 +342,7 @@ All of the following are non-negotiable for MVP -- removing any one breaks the c
 | Content-hash image caching | Avoid unnecessary rebuilds |
 | TTY mode with Ctrl+C lifecycle | Simple, no daemon complexity |
 | `yq` as hard dependency | Robust YAML parsing |
+| Auto dependency isolation (`auto_isolate_deps`) | Prevents macOS/Linux native module clashes in mounted project dirs |
 
 **Explicitly deferred from MVP:**
 - Multi-agent parallel orchestration
@@ -379,6 +394,9 @@ All of the following are non-negotiable for MVP -- removing any one breaks the c
 - FR7: Developer can select which AI agent runtime to use (claude-code, gemini-cli)
 - FR8: Developer can override the default config file path with a `-f` flag
 - FR9: Developer can generate a starter configuration file with sensible defaults via `sandbox init`
+- FR9a: Developer can enable automatic dependency isolation (`auto_isolate_deps: true`) to create anonymous volume mounts over platform-specific dependency directories (e.g., `node_modules/`) within mounted project paths
+- FR9b: When `auto_isolate_deps` is enabled, the system scans mounted project paths at launch for `package.json` files and creates anonymous Docker volume mounts for each corresponding `node_modules/` directory
+- FR9c: The system logs all auto-detected dependency isolation mounts at launch so the developer has visibility into what was isolated
 
 ### Sandbox Lifecycle
 
@@ -389,6 +407,7 @@ All of the following are non-negotiable for MVP -- removing any one breaks the c
 - FR14: Developer can stop a running sandbox session with Ctrl+C
 - FR15: System validates that required dependencies (Docker, yq) are present before proceeding
 - FR16: System validates that all declared secrets are set in the host environment before launching
+- FR16a: When `auto_isolate_deps` is enabled, the system creates anonymous volume mounts for each detected dependency directory during sandbox launch
 
 ### Agent Runtime
 
@@ -412,7 +431,7 @@ All of the following are non-negotiable for MVP -- removing any one breaks the c
 
 ### Isolation Boundaries
 
-- FR31: System blocks git push operations via a git wrapper, returning standard "unauthorized" errors
+- FR31: System blocks git push operations, returning standard "unauthorized" errors
 - FR32: System prevents agent access to host filesystem beyond explicitly mounted paths
 - FR33: System prevents agent access to host credentials, SSH keys, and cloud tokens not explicitly declared as secrets
 - FR34: System prevents inner containers from being reachable outside the sandbox network
@@ -426,7 +445,7 @@ All of the following are non-negotiable for MVP -- removing any one breaks the c
 - FR39: System pins base images to digest for reproducible builds
 - FR40: System passes SDK versions as build arguments to the Dockerfile
 - FR41: System installs configured MCP servers at image build time
-- FR42: System bakes git wrapper and isolation boundary scripts into the image
+- FR42: System includes git push blocking and isolation boundary enforcement in the built image
 - FR43: System tags images using content hash of config + template + sandbox files for cache management
 
 ## Non-Functional Requirements
@@ -453,5 +472,5 @@ The security model protects against accidental leakage from AI agents that hallu
 
 - NFR11: The CLI runs on macOS (arm64/amd64) and Linux (amd64) with bash 4+
 - NFR12: Image builds are reproducible -- the same config + template + sandbox files produce an identical image regardless of when or where the build runs (base image pinned to digest)
-- NFR13: The CLI fails fast with clear, actionable error messages when dependencies are missing, secrets are unset, or configuration is invalid
+- NFR13: The CLI fails fast with error messages that name the missing dependency, unset secret, or invalid field and state the required fix action
 - NFR14: A crashed or Ctrl+C'd sandbox leaves no orphaned containers or dangling networks on the host

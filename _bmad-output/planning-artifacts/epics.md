@@ -145,6 +145,10 @@ N/A -- sandbox is a CLI tool with no GUI. No UX design document applicable.
 | FR35 | Epic 4 | Non-privileged inner Docker |
 | FR36 | Epic 4 | Private network bridge |
 | FR37 | Epic 3 | Standard error codes at boundaries |
+| FR9a | Epic 8 | auto_isolate_deps config option |
+| FR9b | Epic 8 | Scan and create volumes for node_modules |
+| FR9c | Epic 8 | Log isolated mounts |
+| FR16a | Epic 8 | Volume mounts assembled at launch |
 | FR38 | Epic 1 | Dockerfile from template |
 | FR39 | Epic 1 | Base images pinned to digest |
 | FR40 | Epic 1 | SDK versions as build args |
@@ -177,6 +181,10 @@ An agent can use MCP servers (starting with Playwright) to run end-to-end browse
 ### Epic 6: Host Agent Config Inheritance (Tech Spec)
 The sandbox can mount the host's agent config directory to share authentication and settings, avoiding re-authentication per session.
 **FRs covered:** Related to FR17, FR18 (agent runtime auth)
+
+### Epic 8: Auto Dependency Isolation -- Prevent Cross-Platform Module Clashes
+The sandbox automatically detects and isolates platform-specific dependency directories (node_modules) in mounted project paths using named Docker volumes, preventing macOS-compiled native modules from crashing inside the Linux sandbox.
+**FRs covered:** FR9a, FR9b, FR9c, FR16a
 
 ### Epic 7: Sandbox Runtime Hardening (Sprint Change Proposal 2026-03-25)
 An agent operating inside the sandbox can use all runtime capabilities without encountering missing dependencies, broken commands, or authentication failures.
@@ -693,3 +701,49 @@ This story requires root cause analysis before implementation. Possible causes:
 - Start sandbox with mount, exec in, check: `ls -la /home/sandbox/.claude/`, `echo $HOME`, `id`, `whoami`
 - Run `claude --version` and check for config-related errors in verbose mode
 - Compare `.claude` directory contents on host vs inside container
+
+## Epic 8: Auto Dependency Isolation -- Prevent Cross-Platform Module Clashes
+
+The sandbox automatically detects and isolates platform-specific dependency directories (node_modules) in mounted project paths using named Docker volumes, preventing macOS-compiled native modules from crashing inside the Linux sandbox.
+
+### Story 8.1: Auto Dependency Isolation via Named Volumes
+
+As a developer,
+I want the sandbox to automatically detect `package.json` files in my mounted project paths and isolate their `node_modules/` directories with named Docker volumes,
+So that macOS-compiled native modules don't crash inside the Linux sandbox and I don't have to manually manage volume mounts.
+
+**Acceptance Criteria:**
+
+**Given** a config with `auto_isolate_deps: true` and a mount with a project containing `package.json` at the root
+**When** the developer runs `sandbox run`
+**Then** the system creates a named volume mount over `<container_target>/node_modules` (e.g., `-v sandbox-myapp-node_modules:/workspace/node_modules`) and logs "isolating: /workspace/node_modules (volume: sandbox-myapp-node_modules)" to stdout
+
+**Given** a monorepo with `package.json` files at root, `packages/api/`, and `packages/web/`
+**When** the sandbox launches with `auto_isolate_deps: true`
+**Then** three named volume mounts are created, one for each `node_modules/` sibling, with volume names following the convention `sandbox-<project>-<relative-path-dashed>-node_modules`
+
+**Given** `auto_isolate_deps` is absent or `false` in config
+**When** the sandbox launches
+**Then** no scanning occurs, no volumes are added, zero overhead
+
+**Given** a fresh project with no `package.json` files yet
+**When** the sandbox launches with `auto_isolate_deps: true`
+**Then** no volumes are created, no output is logged -- the agent creates Linux-native dependencies from scratch on first `npm install`
+
+**Given** named volumes were created in a previous session
+**When** the developer launches a new sandbox session
+**Then** the same named volumes are reused, preserving previously installed Linux-native dependencies across sessions
+
+**Given** `sandbox init` generates a starter config
+**When** the developer inspects the generated config
+**Then** `auto_isolate_deps` appears as a commented-out option with an inline explanation of when to enable it
+
+**Implementation Notes:**
+- New function `detect_isolate_deps()` in `sandbox.sh`
+- Called from `run_sandbox()` after `parse_config()` but before `docker run` command assembly
+- Host-side scan: `find <mount_source> -name package.json -not -path '*/node_modules/*'`
+- For each found `package.json`, derive the `node_modules` sibling path relative to mount source
+- Volume naming: `sandbox-<project_name>-<relative_path_with_slashes_replaced_by_dashes>-node_modules`
+- Returns additional `-v` flags appended to the run command
+- Update `templates/config.yaml` to include `auto_isolate_deps` option (commented out)
+- **FRs covered:** FR9a, FR9b, FR9c, FR16a

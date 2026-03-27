@@ -28,9 +28,9 @@ _This document builds collaboratively through step-by-step discovery. Sections a
 ### Requirements Overview
 
 **Functional Requirements:**
-43 functional requirements across 6 categories:
-- **Sandbox Configuration (FR1-FR9):** YAML-driven configuration for SDKs, packages, MCP servers, mounts, secrets, env vars, agent selection, and config path override. `sandbox init` generates starter config.
-- **Sandbox Lifecycle (FR10-FR16):** Build, run, and auto-rebuild lifecycle managed by shell CLI. TTY mode with Ctrl+C lifecycle. Dependency and secret validation before launch.
+46 functional requirements across 6 categories:
+- **Sandbox Configuration (FR1-FR9, FR9a-FR9c):** YAML-driven configuration for SDKs, packages, MCP servers, mounts, secrets, env vars, agent selection, and config path override. `sandbox init` generates starter config. Optional `auto_isolate_deps` enables automatic detection and isolation of platform-specific dependency directories (e.g., `node_modules/`) via named volumes.
+- **Sandbox Lifecycle (FR10-FR16, FR16a):** Build, run, and auto-rebuild lifecycle managed by shell CLI. TTY mode with Ctrl+C lifecycle. Dependency and secret validation before launch. When `auto_isolate_deps` is enabled, named volume mounts are assembled at launch for detected dependency directories.
 - **Agent Runtime (FR17-FR22):** AI agents (Claude Code, Gemini CLI) run with full terminal access inside the sandbox. Agents interact with mounted project files and can execute BMAD workflows.
 - **Development Toolchain (FR23-FR30):** Local git, internet access, CLI tools, Docker/Docker Compose, Playwright MCP, and MCP server management inside the sandbox.
 - **Isolation Boundaries (FR31-FR37):** Git push blocked via wrapper, host filesystem restricted to declared mounts, host credentials inaccessible, inner containers network-isolated, non-privileged inner Docker, standard error codes at boundaries.
@@ -200,6 +200,46 @@ sandbox/
   ```
 - **Affects:** Image builder (MCP packages installed at build time), entrypoint (generates config), agent runtime (discovers MCP via standard config)
 
+### Automatic Dependency Isolation (`auto_isolate_deps`)
+
+- **Decision:** Host-side scan of mounted project paths for `package.json` files at launch, with named Docker/Podman volumes overlaying each corresponding `node_modules/` directory inside the container
+- **Rationale:** macOS-compiled native modules in `node_modules/` crash inside the Linux sandbox. Named volumes (not anonymous, not host-mapped) provide an isolated Linux-native `node_modules/` that persists across sessions, avoiding re-install on every launch. The scan runs on the host before `docker run` — once inside the container it's too late to add mounts.
+
+**Detection Logic:**
+- Triggered only when `auto_isolate_deps: true` is set in config
+- For each mount declared in config: resolve the host-side source path
+- Run `find <mount_source> -name package.json -not -path '*/node_modules/*'` to discover `package.json` files while excluding any nested inside existing `node_modules/` directories
+- For each discovered `package.json`: derive the `node_modules` sibling path relative to the mount source
+
+**Volume Assembly:**
+- Each detected `node_modules/` becomes a named volume mount: `-v <volume_name>:<container_target_path>/node_modules`
+- **Naming convention:** `sandbox-<project_name>-<relative_path_with_dashes>-node_modules`
+  - Example: project `myapp`, mount target `/workspace`, `package.json` at root → volume name `sandbox-myapp-node_modules`
+  - Example: project `myapp`, `packages/api/package.json` → volume name `sandbox-myapp-packages-api-node_modules`
+- Named volumes are managed by Docker/Podman and persist across sessions — no host filesystem mapping
+- Slashes in relative paths are replaced with dashes in the volume name
+
+**Implementation Location:**
+- New function `detect_isolate_deps()` in `sandbox.sh`
+- Called from `run_sandbox()` after `parse_config()` but before `docker run` command assembly
+- Returns additional `-v` flags appended to the run command
+- If `auto_isolate_deps` is not set or `false`: function returns immediately with no output
+
+**Logging:**
+- Each discovered mount logged to stdout following existing output conventions:
+  ```
+  isolating: /workspace/node_modules (volume: sandbox-myapp-node_modules)
+  isolating: /workspace/packages/api/node_modules (volume: sandbox-myapp-packages-api-node_modules)
+  ```
+- If no `package.json` files found (fresh project): no output, silent pass
+
+**Edge Cases:**
+- Fresh project with no `package.json`: no volumes created, no output — agent creates Linux-native deps from scratch on first `npm install`
+- Monorepo with workspaces: multiple `package.json` files found, each gets its own named volume
+- `auto_isolate_deps` absent or `false`: no scanning, no volumes, zero overhead
+
+- **Affects:** `sandbox.sh` (new `detect_isolate_deps()` function in run path), `templates/config.yaml` (new `auto_isolate_deps` option with inline comment)
+
 ### Decision Impact Analysis
 
 **Implementation Sequence:**
@@ -349,6 +389,7 @@ sandbox/
 **templates/config.yaml** — Starter config with inline comments explaining each option:
 - Agent selection, SDK versions, packages, MCP servers
 - Mount and secret declarations, environment variables
+- `auto_isolate_deps` option (commented out by default, with explanation of when to enable)
 - Serves as both documentation and scaffolding
 
 **scripts/entrypoint.sh** — Runs inside container at startup:
@@ -404,6 +445,10 @@ config.yaml --> sandbox.sh (parse) --> Dockerfile.template (process) --> Dockerf
 | Requirement | File | Function/Section |
 |---|---|---|
 | FR1-FR7 (config options) | `templates/config.yaml`, `sandbox.sh` | Config parsing functions |
+| FR9a (auto_isolate_deps config) | `templates/config.yaml`, `sandbox.sh` | Config parsing, `parse_config()` |
+| FR9b (scan and create volumes) | `sandbox.sh` | `detect_isolate_deps()` |
+| FR9c (log isolated mounts) | `sandbox.sh` | `detect_isolate_deps()` stdout logging |
+| FR16a (volume mounts at launch) | `sandbox.sh` | `run_sandbox()` → `detect_isolate_deps()` → `-v` flags |
 | FR8 (`-f` flag) | `sandbox.sh` | Command dispatch |
 | FR9 (`sandbox init`) | `sandbox.sh`, `templates/config.yaml` | `init_config()` |
 | FR10 (`sandbox build`) | `sandbox.sh` | `build_image()` |
@@ -438,7 +483,7 @@ config.yaml --> sandbox.sh (parse) --> Dockerfile.template (process) --> Dockerf
 
 ### Requirements Coverage
 
-**Functional Requirements:** All 43 FRs (FR1-FR43) have explicit architectural support mapped to specific files and functions in the Project Structure section.
+**Functional Requirements:** All 46 FRs (FR1-FR43, FR9a-FR9c, FR16a) have explicit architectural support mapped to specific files and functions in the Project Structure section.
 
 **Non-Functional Requirements:** All 14 NFRs (NFR1-NFR14) are architecturally addressed through Podman rootless (security), version pinning (integration), tini signal handling (reliability), and bash 4+ with macOS caveat documented (portability).
 
@@ -498,14 +543,14 @@ config.yaml --> sandbox.sh (parse) --> Dockerfile.template (process) --> Dockerf
 - [x] File responsibilities documented
 - [x] Architectural boundaries established (build/run, host/container, agent/sandbox)
 - [x] Data flow mapped
-- [x] All 43 FRs mapped to specific files and functions
+- [x] All 46 FRs mapped to specific files and functions (including FR9a-FR9c, FR16a for auto_isolate_deps)
 - [x] Content-hash cache key files explicitly listed
 
 ### Architecture Readiness Assessment
 
 **Overall Status:** READY FOR IMPLEMENTATION
 
-**Confidence Level:** High — all requirements covered, no critical gaps, 8 important gaps identified and resolved during validation, decisions are coherent and well-constrained.
+**Confidence Level:** High — all requirements covered (including auto_isolate_deps added 2026-03-26), no critical gaps, 8 important gaps identified and resolved during validation, decisions are coherent and well-constrained.
 
 **Key Strengths:**
 - Minimal surface area — 6 files total, single-script CLI
@@ -543,4 +588,5 @@ config.yaml --> sandbox.sh (parse) --> Dockerfile.template (process) --> Dockerf
 6. Add git wrapper and isolation boundaries
 7. Add MCP server installation, manifest generation, and .mcp.json merge logic
 8. Implement content-hash caching (config.yaml + Dockerfile.template + scripts/*)
-9. Polish CLI (init command, --help, error messages)
+9. Implement `detect_isolate_deps()` — host-side `package.json` scan, named volume assembly, logging
+10. Polish CLI (init command, --help, error messages)

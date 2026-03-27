@@ -25,6 +25,10 @@ mounts:
   - source: ".."
     target: "/workspace"
 
+# Auto-detect package.json files in mounts and isolate node_modules via named
+# volumes (prevents macOS/Linux native module clashes)
+auto_isolate_deps: true
+
 # Secret names resolved from host environment variables at runtime
 # secrets:
 #   - ANTHROPIC_API_KEY

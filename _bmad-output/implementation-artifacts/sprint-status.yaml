@@ -1,5 +1,5 @@
 # generated: 2026-03-24
-# last_updated: 2026-03-25 (updated by create-story)
+# last_updated: 2026-03-27 (sprint-planning)
 # project: sandbox
 # project_key: NOKEY
 # tracking_system: file-system
@@ -35,13 +35,10 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-03-24
-last_updated: 2026-03-25 (dev-story)
+last_updated: 2026-03-27 (code-review)
 project: sandbox
-
-
 project_key: NOKEY
 tracking_system: file-system
-
 story_location: "{project-root}/_bmad-output/implementation-artifacts"
 
 development_status:
@@ -89,9 +86,14 @@ development_status:
   epic-6-retrospective: optional
 
   # Epic 7: Sandbox Runtime Hardening (sprint change proposal 2026-03-25)
-  epic-7: in-progress
+  epic-7: done
   7-1-fix-playwright-system-dependencies: done
   7-2-fix-docker-compose-plugin-registration: done
   7-3-migrate-claude-cli-to-official-install-script: done
   7-4-investigate-fix-host-agent-config-mount: done
   epic-7-retrospective: optional
+
+  # Epic 8: Auto Dependency Isolation -- Prevent Cross-Platform Module Clashes
+  epic-8: in-progress
+  8-1-auto-dependency-isolation-via-named-volumes: done
+  epic-8-retrospective: optional
