@@ -233,6 +233,7 @@ validate_secrets() {
 # ISOLATE_VOLUME_FLAGS with named volume mounts for each node_modules directory.
 detect_isolate_deps() {
   ISOLATE_VOLUME_FLAGS=()
+  ISOLATE_DEPS_TARGETS=()
 
   if [[ "${CFG_AUTO_ISOLATE_DEPS}" != "true" ]]; then
     return 0
@@ -318,6 +319,7 @@ detect_isolate_deps() {
       fi
 
       ISOLATE_VOLUME_FLAGS+=("-v" "${vol_name}:${container_nm}")
+      ISOLATE_DEPS_TARGETS+=("${container_nm}")
       info "isolating: ${container_nm} (volume: ${vol_name})"
     done
   done
@@ -654,9 +656,13 @@ cmd_run() {
     run_flags+=("-e" "HOST_UID=$(id -u)" "-e" "HOST_GID=$(id -g)")
   fi
 
-  # Append dependency isolation volume flags (if any)
+  # Append dependency isolation volume flags and pass targets for entrypoint chown
   if [[ ${#ISOLATE_VOLUME_FLAGS[@]} -gt 0 ]]; then
     run_flags+=("${ISOLATE_VOLUME_FLAGS[@]}")
+    local IFS_BAK="${IFS}"
+    IFS=":"
+    run_flags+=("-e" "ISOLATE_DEPS_TARGETS=${ISOLATE_DEPS_TARGETS[*]}")
+    IFS="${IFS_BAK}"
   fi
 
   info "starting sandbox: ${IMAGE_TAG}"

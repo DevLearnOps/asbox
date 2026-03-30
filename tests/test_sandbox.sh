@@ -3713,6 +3713,7 @@ assert_exit_code 0 "${exit_code}" "8.1.1: auto_isolate_deps run exits code 0"
 docker_run_line="$(grep "docker run" "${tmpdir}/mockbin/docker.log" || true)"
 assert_contains "${docker_run_line}" "sandbox-" "8.1.1: volume name has sandbox- prefix"
 assert_contains "${docker_run_line}" "-node_modules:/workspace/node_modules" "8.1.1: volume name convention and target"
+assert_contains "${docker_run_line}" "ISOLATE_DEPS_TARGETS=/workspace/node_modules" "8.1.1: passes ISOLATE_DEPS_TARGETS env var"
 assert_contains "${output_all}" "isolating: /workspace/node_modules (volume: sandbox-" "8.1.1: logs full isolation message with volume name"
 rm -rf "${tmpdir}"
 
@@ -3742,6 +3743,10 @@ assert_contains "${docker_run_line}" "sandbox-" "8.1.2: volume names have sandbo
 assert_contains "${docker_run_line}" "-node_modules:/workspace/node_modules" "8.1.2: root volume name convention"
 assert_contains "${docker_run_line}" "-packages-api-node_modules:/workspace/packages/api/node_modules" "8.1.2: packages/api volume name convention"
 assert_contains "${docker_run_line}" "-packages-web-node_modules:/workspace/packages/web/node_modules" "8.1.2: packages/web volume name convention"
+isolate_targets_val="$(echo "${docker_run_line}" | sed -n 's/.*ISOLATE_DEPS_TARGETS=\([^ ]*\).*/\1/p')"
+assert_contains "${isolate_targets_val}" "/workspace/node_modules" "8.1.2: ISOLATE_DEPS_TARGETS contains root node_modules"
+assert_contains "${isolate_targets_val}" "/workspace/packages/api/node_modules" "8.1.2: ISOLATE_DEPS_TARGETS contains packages/api node_modules"
+assert_contains "${isolate_targets_val}" "/workspace/packages/web/node_modules" "8.1.2: ISOLATE_DEPS_TARGETS contains packages/web node_modules"
 assert_contains "${output_all}" "isolating: /workspace/node_modules" "8.1.2: logs root isolation"
 assert_contains "${output_all}" "isolating: /workspace/packages/api/node_modules" "8.1.2: logs api isolation"
 assert_contains "${output_all}" "isolating: /workspace/packages/web/node_modules" "8.1.2: logs web isolation"
@@ -3860,7 +3865,12 @@ rm -rf "${tmpdir}"
 # Test: config template includes commented-out auto_isolate_deps
 config_template="$(cat "${PROJECT_ROOT}/templates/config.yaml")"
 assert_contains "${config_template}" "auto_isolate_deps" "8.1: config template contains auto_isolate_deps option"
-assert_contains "${config_template}" "# auto_isolate_deps: true" "8.1: auto_isolate_deps is commented out in template"
+assert_contains "${config_template}" "auto_isolate_deps: true" "8.1: auto_isolate_deps present in template"
+
+# Test 8.1.8: entrypoint.sh contains ISOLATE_DEPS_TARGETS chown logic
+entrypoint_content="$(cat "${PROJECT_ROOT}/scripts/entrypoint.sh")"
+assert_contains "${entrypoint_content}" "ISOLATE_DEPS_TARGETS" "8.1.8: entrypoint reads ISOLATE_DEPS_TARGETS env var"
+assert_contains "${entrypoint_content}" "chown sandbox:sandbox" "8.1.8: entrypoint chowns dep dirs to sandbox user"
 
 # ============================================================================
 # Summary

@@ -43,6 +43,17 @@ if [[ "$(id -u)" == "0" ]]; then
     [[ -d /opt/playwright-browsers ]] && chown -R sandbox:sandbox /opt/playwright-browsers
   fi
 
+  # Fix ownership of named-volume dependency mounts (created as root by Docker/Podman)
+  if [[ -n "${ISOLATE_DEPS_TARGETS:-}" ]]; then
+    IFS=':' read -ra _dep_targets <<< "${ISOLATE_DEPS_TARGETS}"
+    for _dep_dir in "${_dep_targets[@]}"; do
+      if [[ -d "${_dep_dir}" ]]; then
+        chown sandbox:sandbox "${_dep_dir}"
+      fi
+    done
+    unset _dep_targets _dep_dir
+  fi
+
   # Ensure XDG_RUNTIME_DIR exists for the sandbox user (must run as root since /run/user is root-owned)
   runtime_dir="/run/user/$(id -u sandbox)"
   mkdir -p "${runtime_dir}"
