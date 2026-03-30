@@ -2266,6 +2266,9 @@ assert_contains "${entrypoint_content}" "podman info" "entrypoint verifies podma
 assert_contains "${entrypoint_content}" "podman system service" "entrypoint starts Podman API socket service"
 assert_contains "${entrypoint_content}" "podman/podman.sock" "entrypoint configures podman socket path"
 
+# Test: entrypoint.sh sets TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE for Podman compatibility
+assert_contains "${entrypoint_content}" "TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE" "entrypoint sets TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE for Podman"
+
 # Test: entrypoint.sh Podman init works with mock podman binary
 tmpdir="$(mktemp -d)"
 mock_agent_dir="$(mktemp -d)"
