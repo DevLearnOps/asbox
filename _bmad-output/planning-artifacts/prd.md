@@ -16,8 +16,10 @@ stepsCompleted:
   - step-12-complete
 inputDocuments: []
 workflowType: 'prd'
-lastEdited: '2026-03-26'
+lastEdited: '2026-03-31'
 editHistory:
+  - date: '2026-03-31'
+    changes: 'Added webkit browser support for mobile device emulation, agent environment instruction files (CLAUDE.md/GEMINI.md) baked into sandbox image'
   - date: '2026-03-26'
     changes: 'Added auto_isolate_deps feature for anonymous volume mounts to prevent macOS/Linux dependency clashes'
 documentCounts:
@@ -265,7 +267,7 @@ When `auto_isolate_deps` is enabled, the sandbox scans all mounted project paths
 - Parses YAML configuration via `yq` (hard dependency -- eliminates fragile awk/sed parsing for nested structures)
 - Generates a Dockerfile from a `Dockerfile.template` shipped with the sandbox repo. The script reads config values via `yq`, substitutes placeholders in the template, and writes a resolved Dockerfile. The template is human-readable and inspectable.
 - Calls `docker build` and `docker run` directly
-- Manages image tagging/caching via content hash of config file + Dockerfile template + sandbox repo files (git wrapper, entrypoint scripts). Only rebuilds when any input changes.
+- Manages image tagging/caching via content hash of config file + Dockerfile template + sandbox repo files (git wrapper, entrypoint scripts, agent instructions). Only rebuilds when any input changes.
 - Assembles Docker run flags for mounts, secrets, env vars, and TTY
 
 **Dependencies:** Docker (or Podman) and `yq` installed on the host. The script validates both are present at startup with clear error messages if missing.
@@ -332,7 +334,7 @@ All of the following are non-negotiable for MVP -- removing any one breaks the c
 | Configurable SDK versions (Node.js, Go, Python) | Different projects need different stacks |
 | Docker and Docker Compose inside sandbox | Agents must build images and run services to test |
 | Non-privileged inner Docker (rootless/sysbox/Podman) | Isolation is the product -- privileged mode defeats the purpose |
-| Playwright MCP integration | E2E testing is part of the inner development loop |
+| Playwright MCP integration (chromium + webkit) | E2E testing is part of the inner development loop — webkit required for mobile device emulation |
 | Local-only git (push blocked via wrapper) | Core isolation boundary |
 | Scoped secrets injection (host env -> container env) | Agent needs API keys, nothing else |
 | Internet access (outbound) | Agent must fetch docs, packages, dependencies |
@@ -373,7 +375,7 @@ All of the following are non-negotiable for MVP -- removing any one breaks the c
 **Technical Risks:**
 - **Docker isolation model (highest risk):** The choice between rootless Docker, sysbox, and Podman is the most consequential architecture decision. Mitigation: spike on all three early, pick the one that works on macOS (where Manuel develops) with least friction. If one approach fails, the others are fallbacks.
 - **Dockerfile.template complexity:** Template substitution for multiple SDKs and packages could get unwieldy. Mitigation: start with a simple template covering the most common case (Node.js + Playwright), extend incrementally.
-- **MCP server integration inside container:** Playwright MCP needs a browser runtime inside Docker. Mitigation: validate Playwright in Docker early -- this is a known-solvable problem but requires correct base image and dependencies.
+- **MCP server integration inside container:** Playwright MCP needs browser runtimes (chromium and webkit) inside Docker. Mitigation: validate Playwright in Docker early -- this is a known-solvable problem but requires correct base image and dependencies. WebKit requires significantly more system libraries (~60 packages including GTK4, GStreamer, Wayland) but is necessary for mobile device emulation tests.
 
 **Market Risks:**
 - Minimal -- this is a personal tool first. The market validation is: does Manuel use it daily? If yes, extend to team. If the team uses it daily, consider broader distribution.
@@ -427,6 +429,7 @@ All of the following are non-negotiable for MVP -- removing any one breaks the c
 - FR27: Agent can run `docker compose up` to start multi-service applications inside the sandbox
 - FR28: Agent can reach application ports of services running in inner containers
 - FR29: Agent can run Playwright tests against running applications via MCP integration
+- FR29a: Agent can run Playwright tests using chromium for desktop browser testing and webkit for mobile device emulation (iPhone, iPad, etc.)
 - FR30: Agent can start MCP servers as needed via MCP protocol
 
 ### Isolation Boundaries
@@ -447,6 +450,7 @@ All of the following are non-negotiable for MVP -- removing any one breaks the c
 - FR41: System installs configured MCP servers at image build time
 - FR42: System includes git push blocking and isolation boundary enforcement in the built image
 - FR43: System tags images using content hash of config + template + sandbox files for cache management
+- FR44: System installs agent environment instruction files (`CLAUDE.md`, `GEMINI.md`) into the sandbox user's home directory at image build time, providing the agent with sandbox-specific constraints (no sudo, container runtime details, Playwright usage, e2e test workflow) so it can operate without trial-and-error troubleshooting
 
 ## Non-Functional Requirements
 

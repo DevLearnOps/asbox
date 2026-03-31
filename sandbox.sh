@@ -351,15 +351,16 @@ compute_content_hash() {
   local hash_input_2="${SCRIPT_DIR}/Dockerfile.template"
   local hash_input_3="${SCRIPT_DIR}/scripts/entrypoint.sh"
   local hash_input_4="${SCRIPT_DIR}/scripts/git-wrapper.sh"
+  local hash_input_5="${SCRIPT_DIR}/scripts/agent-instructions.md"
 
-  for f in "${hash_input_1}" "${hash_input_2}" "${hash_input_3}" "${hash_input_4}"; do
+  for f in "${hash_input_1}" "${hash_input_2}" "${hash_input_3}" "${hash_input_4}" "${hash_input_5}"; do
     if [[ ! -f "${f}" ]]; then
       die "hash input file not found: ${f}" 1
     fi
   done
 
   local hash
-  hash="$(cat "${hash_input_1}" "${hash_input_2}" "${hash_input_3}" "${hash_input_4}" \
+  hash="$(cat "${hash_input_1}" "${hash_input_2}" "${hash_input_3}" "${hash_input_4}" "${hash_input_5}" \
     | "${hash_cmd[@]}" | cut -c1-12)"
   if [[ -z "${hash}" ]]; then
     die "content hash computation produced empty result" 1

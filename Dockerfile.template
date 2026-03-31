@@ -78,7 +78,7 @@ RUN npm install -g @google/gemini-cli
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers
 ENV PLAYWRIGHT_MCP_BROWSER=chromium
 RUN npm install -g @playwright/mcp@{{MCP_PLAYWRIGHT_VERSION}} && \
-    npx -p @playwright/mcp@{{MCP_PLAYWRIGHT_VERSION}} playwright install --with-deps chromium
+    npx -p @playwright/mcp@{{MCP_PLAYWRIGHT_VERSION}} playwright install --with-deps chromium webkit
 # {{/IF_MCP_PLAYWRIGHT}}
 
 # MCP server manifest
@@ -90,8 +90,23 @@ COPY scripts/git-wrapper.sh /usr/local/bin/git
 COPY scripts/healthcheck-poller.sh /usr/local/bin/healthcheck-poller.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/git /usr/local/bin/healthcheck-poller.sh
 
+# Agent environment instructions (shared source, agent-specific paths)
+COPY scripts/agent-instructions.md /etc/sandbox/agent-instructions.md
+
 # Non-root user for rootless operation
 RUN useradd -m -s /bin/bash sandbox
+
+# {{IF_AGENT_CLAUDE}}
+RUN mkdir -p /home/sandbox/.claude && \
+    cp /etc/sandbox/agent-instructions.md /home/sandbox/.claude/CLAUDE.md && \
+    chown -R sandbox:sandbox /home/sandbox/.claude
+# {{/IF_AGENT_CLAUDE}}
+
+# {{IF_AGENT_GEMINI}}
+RUN mkdir -p /home/sandbox/.gemini && \
+    cp /etc/sandbox/agent-instructions.md /home/sandbox/.gemini/GEMINI.md && \
+    chown -R sandbox:sandbox /home/sandbox/.gemini
+# {{/IF_AGENT_GEMINI}}
 
 # {{IF_MCP_PLAYWRIGHT}}
 RUN chown -R sandbox:sandbox /opt/playwright-browsers && \

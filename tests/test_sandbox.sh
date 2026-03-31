@@ -1056,6 +1056,7 @@ chmod +x "${tmpdir}/sandbox.sh"
 cp "${PROJECT_ROOT}/Dockerfile.template" "${tmpdir}/"
 mkdir -p "${tmpdir}/scripts" "${tmpdir}/templates"
 cp "${PROJECT_ROOT}/scripts/entrypoint.sh" "${tmpdir}/scripts/"
+cp "${PROJECT_ROOT}/scripts/agent-instructions.md" "${tmpdir}/scripts/"
 cp "${PROJECT_ROOT}/templates/config.yaml" "${tmpdir}/templates/"
 # Deliberately do NOT copy scripts/git-wrapper.sh
 cat > "${tmpdir}/config.yaml" <<'YAML'
@@ -1084,7 +1085,7 @@ output_base="$(PATH="${BUILD_PATH}" bash "${SANDBOX}" build -f "${tmpdir}/config
 set -e
 base_tag="$(echo "${output_base}" | grep "image built:" | sed 's/.*image built: //')"
 
-for change_file in Dockerfile.template scripts/entrypoint.sh scripts/git-wrapper.sh; do
+for change_file in Dockerfile.template scripts/entrypoint.sh scripts/git-wrapper.sh scripts/agent-instructions.md; do
   target="${PROJECT_ROOT}/${change_file}"
   orig="$(cat "${target}")"
   echo "# review-test-modification" >> "${target}"
@@ -3029,7 +3030,7 @@ dockerfile_content="$(cat "${PROJECT_ROOT}/.sandbox-dockerfile")"
 assert_contains "${dockerfile_content}" "@playwright/mcp" "5.1: Dockerfile installs @playwright/mcp package"
 
 # Test 5.1-1.2: Playwright browser dependencies installed
-assert_contains "${dockerfile_content}" "playwright install --with-deps chromium" "5.1: Dockerfile installs Playwright browser dependencies"
+assert_contains "${dockerfile_content}" "playwright install --with-deps chromium webkit" "5.1: Dockerfile installs Playwright browser dependencies (chromium + webkit)"
 
 # Test 5.1-1.3: npm install used for global install with version pin
 assert_contains "${dockerfile_content}" "npm install -g @playwright/mcp@" "5.1: Dockerfile uses npm install -g with version pin for Playwright MCP"
@@ -3619,7 +3620,7 @@ assert_exit_code 0 "${exit_code}" "7.1: build with mcp playwright exits code 0"
 dockerfile_content="$(cat "${PROJECT_ROOT}/.sandbox-dockerfile")"
 
 # Test 7.1-1: Dockerfile installs Playwright with --with-deps (AC #1, #2)
-assert_contains "${dockerfile_content}" "playwright install --with-deps chromium" "7.1: Dockerfile contains playwright install --with-deps chromium"
+assert_contains "${dockerfile_content}" "playwright install --with-deps chromium webkit" "7.1: Dockerfile contains playwright install --with-deps chromium webkit"
 
 rm -rf "${tmpdir}"
 
@@ -3876,6 +3877,71 @@ assert_contains "${config_template}" "auto_isolate_deps: true" "8.1: auto_isolat
 entrypoint_content="$(cat "${PROJECT_ROOT}/scripts/entrypoint.sh")"
 assert_contains "${entrypoint_content}" "ISOLATE_DEPS_TARGETS" "8.1.8: entrypoint reads ISOLATE_DEPS_TARGETS env var"
 assert_contains "${entrypoint_content}" "chown sandbox:sandbox" "8.1.8: entrypoint chowns dep dirs to sandbox user"
+
+# ============================================================================
+# Agent Environment Instructions (CLAUDE.md / GEMINI.md)
+# ============================================================================
+
+echo "# Agent Environment Instructions"
+
+# Test: agent-instructions.md exists in scripts/
+if [[ -f "${PROJECT_ROOT}/scripts/agent-instructions.md" ]]; then
+  pass "agent-instructions.md exists in scripts/"
+else
+  fail "agent-instructions.md exists in scripts/"
+fi
+
+# Test: agent-instructions.md is copied to /etc/sandbox/ in Dockerfile
+dockerfile_template="$(cat "${PROJECT_ROOT}/Dockerfile.template")"
+assert_contains "${dockerfile_template}" "COPY scripts/agent-instructions.md /etc/sandbox/agent-instructions.md" "Dockerfile copies agent-instructions.md to /etc/sandbox/"
+
+# Test: Dockerfile deploys CLAUDE.md for claude-code agent
+assert_contains "${dockerfile_template}" "cp /etc/sandbox/agent-instructions.md /home/sandbox/.claude/CLAUDE.md" "Dockerfile deploys CLAUDE.md for claude-code agent"
+
+# Test: Dockerfile deploys GEMINI.md for gemini-cli agent
+assert_contains "${dockerfile_template}" "cp /etc/sandbox/agent-instructions.md /home/sandbox/.gemini/GEMINI.md" "Dockerfile deploys GEMINI.md for gemini-cli agent"
+
+# Test: CLAUDE.md block is conditional on IF_AGENT_CLAUDE — resolved for claude-code
+rm -f "${PROJECT_ROOT}/.sandbox-dockerfile"
+tmpdir="$(mktemp -d)"
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: claude-code
+sdks:
+  nodejs: "22"
+YAML
+set +e
+output_all="$(PATH="${BUILD_PATH}" bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
+set -e
+dockerfile_claude="$(cat "${PROJECT_ROOT}/.sandbox-dockerfile")"
+assert_contains "${dockerfile_claude}" "/home/sandbox/.claude/CLAUDE.md" "resolved Dockerfile contains CLAUDE.md for claude-code agent"
+assert_not_contains "${dockerfile_claude}" "/home/sandbox/.gemini/GEMINI.md" "resolved Dockerfile does NOT contain GEMINI.md for claude-code agent"
+rm -rf "${tmpdir}"
+
+# Test: GEMINI.md block is conditional on IF_AGENT_GEMINI — resolved for gemini-cli
+rm -f "${PROJECT_ROOT}/.sandbox-dockerfile"
+tmpdir="$(mktemp -d)"
+cat > "${tmpdir}/config.yaml" <<'YAML'
+agent: gemini-cli
+sdks:
+  nodejs: "22"
+YAML
+set +e
+output_all="$(PATH="${BUILD_PATH}" bash "${SANDBOX}" build -f "${tmpdir}/config.yaml" 2>&1)"
+set -e
+dockerfile_gemini="$(cat "${PROJECT_ROOT}/.sandbox-dockerfile")"
+assert_contains "${dockerfile_gemini}" "/home/sandbox/.gemini/GEMINI.md" "resolved Dockerfile contains GEMINI.md for gemini-cli agent"
+assert_not_contains "${dockerfile_gemini}" "/home/sandbox/.claude/CLAUDE.md" "resolved Dockerfile does NOT contain CLAUDE.md for gemini-cli agent"
+rm -rf "${tmpdir}"
+
+# Test: agent-instructions.md content covers key sandbox constraints
+instructions_content="$(cat "${PROJECT_ROOT}/scripts/agent-instructions.md")"
+assert_contains "${instructions_content}" "sudo" "agent-instructions.md mentions no sudo access"
+assert_contains "${instructions_content}" "Podman" "agent-instructions.md mentions Podman runtime"
+assert_contains "${instructions_content}" "chromium" "agent-instructions.md mentions chromium browser"
+assert_contains "${instructions_content}" "webkit" "agent-instructions.md mentions webkit browser"
+assert_contains "${instructions_content}" "--with-deps" "agent-instructions.md warns against --with-deps"
+assert_contains "${instructions_content}" "docker compose up" "agent-instructions.md documents e2e test workflow"
+assert_contains "${instructions_content}" "git push" "agent-instructions.md mentions git push restriction"
 
 # ============================================================================
 # Summary
