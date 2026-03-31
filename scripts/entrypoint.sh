@@ -80,10 +80,15 @@ if command -v podman >/dev/null 2>&1; then
   export DOCKER_HOST="unix://${XDG_RUNTIME_DIR}/podman/podman.sock"
   ln -sf "${XDG_RUNTIME_DIR}/podman/podman.sock" "${XDG_RUNTIME_DIR}/docker.sock" 2>/dev/null || true
 
-  # Testcontainers compatibility: tell the library where the real socket is so it can
-  # mount it into the Ryuk reaper container (defaults to /var/run/docker.sock which
-  # doesn't exist under Podman rootless).
+  # Testcontainers compatibility for rootless Podman:
+  # - Socket override: Ryuk defaults to /var/run/docker.sock which doesn't exist here.
+  # - Ryuk disabled: rootless Podman can't create bridge interfaces, so the reaper's
+  #   bridge network (10.89.0.0/24) is unreachable from the host, causing i/o timeouts.
+  # - Host override: force connections via localhost port mappings instead of the
+  #   unreachable bridge gateway IP.
   export TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE="${XDG_RUNTIME_DIR}/podman/podman.sock"
+  export TESTCONTAINERS_RYUK_DISABLED=true
+  export TESTCONTAINERS_HOST_OVERRIDE=localhost
 
   # Wait briefly for the socket to become available
   for _ in 1 2 3 4 5; do
