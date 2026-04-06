@@ -14,14 +14,19 @@ stepsCompleted:
   - step-10-nonfunctional
   - step-11-polish
   - step-12-complete
+  - step-e-01-discovery
+  - step-e-02-review
+  - step-e-03-edit
 inputDocuments: []
 workflowType: 'prd'
-lastEdited: '2026-03-31'
+lastEdited: '2026-04-06'
 editHistory:
+  - date: '2026-04-06'
+    changes: 'Comprehensive alignment with implementation: named Docker volumes (not anonymous) for auto_isolate_deps, Podman chosen as inner container runtime (no longer deferred), added host_agent_config and project_name config options, documented Tini init process, UID/GID alignment, healthcheck poller, Testcontainers compatibility, MCP manifest merge behavior, specific exit codes, content hash file list, Claude CLI official install script. Fixed implementation leakage in FR31/FR42/FR16a and NFR13 subjectivity per validation report.'
   - date: '2026-03-31'
     changes: 'Added webkit browser support for mobile device emulation, agent environment instruction files (CLAUDE.md/GEMINI.md) baked into sandbox image'
   - date: '2026-03-26'
-    changes: 'Added auto_isolate_deps feature for anonymous volume mounts to prevent macOS/Linux dependency clashes'
+    changes: 'Added auto_isolate_deps feature for named Docker volume mounts to prevent macOS/Linux dependency clashes'
 documentCounts:
   briefs: 0
   research: 0
@@ -108,11 +113,11 @@ Manuel launches a sandbox and kicks off an agent task, but when he comes back, t
 
 Manuel reads the error, realizes he needs to add `build-essential` to his sandbox configuration. He updates the build arguments, rebuilds the sandbox image, and relaunches. This time the agent completes the task successfully.
 
-In another scenario, Manuel launches a sandbox for a Node.js project he's been developing on macOS. The agent tries to run the app but crashes on a native module compiled for Darwin. Manuel adds `auto_isolate_deps: true` to his config and relaunches. The sandbox detects three `package.json` files (root, `packages/api`, `packages/web`), logs that it's isolating their `node_modules/` directories, and the agent runs `npm install` inside the sandbox to get Linux-native binaries. Everything works.
+In another scenario, Manuel launches a sandbox for a Node.js project he's been developing on macOS. The agent tries to run the app but crashes on a native module compiled for Darwin. Manuel adds `auto_isolate_deps: true` to his config and relaunches. The sandbox detects three `package.json` files (root, `packages/api`, `packages/web`), creates named Docker volumes for each `node_modules/` directory (e.g., `sandbox-myproject-packages-api-node_modules`), logs the isolation mounts, and the agent runs `npm install` inside the sandbox to get Linux-native binaries. Everything works. Named volumes persist across sandbox restarts, so subsequent launches reuse the Linux-native dependencies without reinstalling.
 
 In another scenario, the agent tries to `git push` to the remote. It gets "unauthorized" and moves on -- it logs the commit locally and notes in the chat that it couldn't push. Manuel sees this when he reviews and pushes manually from his host. No damage done.
 
-**Capabilities revealed:** Build argument configuration, sandbox image rebuild, agent error recovery behavior, git push boundary enforcement, clear failure messages at boundaries, automatic dependency isolation for cross-platform compatibility.
+**Capabilities revealed:** Build argument configuration, sandbox image rebuild, agent error recovery behavior, git push boundary enforcement, clear failure messages at boundaries, automatic dependency isolation via named Docker volumes for cross-platform compatibility.
 
 ### Journey 3: Manuel Sets Up a New Project's Sandbox (Builder/Maintainer)
 
@@ -150,7 +155,7 @@ At no point does the agent encounter the developer's SSH keys, cloud credentials
 | Sandbox image rebuild | 2, 3 | MVP |
 | Shareable configuration | 3 | MVP |
 | Standard error codes at boundaries | 2, 4 | MVP |
-| Auto dependency isolation (anonymous mounts) | 2 | MVP |
+| Auto dependency isolation (named Docker volumes) | 2 | MVP |
 
 ## Innovation & Novel Patterns
 
@@ -185,7 +190,7 @@ The sandbox passes validation when all adversarial scenarios fail with standard 
 
 ### Risk Mitigation
 
-- **Docker-in-Docker escape risk:** The widest attack surface. Hard constraint: inner Docker must not require privileged mode on the outer container. The viable design space is rootless Docker, sysbox-based isolation, or Podman (daemonless, rootless by default). Host Docker socket mount and `--privileged` DinD are explicitly ruled out.
+- **Docker-in-Docker escape risk:** The widest attack surface. Hard constraint: inner Docker must not require privileged mode on the outer container. **Resolved:** Rootless Podman was chosen as the inner container runtime, with docker CLI alias for agent compatibility. Podman runs daemonless and rootless by default, using `vfs` storage driver (compatible with nested containers in Docker Desktop), `netavark` networking with `aardvark-dns` for service name resolution, and `file` events logger (avoids journald dependency). Host Docker socket mount and `--privileged` DinD are explicitly ruled out.
 - **Network exposure risk:** Inner containers share a private Docker network visible only within the sandbox. No inner container port is reachable from outside the sandbox boundary. This is standard Docker bridge networking, explicitly configured and enforced.
 - **Credential leakage via internet:** Agent has outbound internet access and could theoretically exfiltrate scoped secrets. Mitigation: scoped secrets are opt-in and minimal; developers only inject what's strictly needed. Future: egress filtering.
 - **Git push isolation:** Implemented via a git wrapper that allows all commands except `push`, returning standard "unauthorized" errors. Simpler and more testable than network-level blocking.
@@ -209,12 +214,15 @@ The sandbox configuration file (`.sandbox/config.yaml` by default) is the primar
 - **Secrets:** Names of host environment variables to inject into the sandbox. The config declares which secrets are needed; the script resolves their values from the host environment at runtime and passes them via `docker run --env`. If a declared secret is not set in the host environment, the script errors with a clear message. Secrets never appear in the config file.
 - **Environment variables:** Non-secret configuration for the agent runtime
 - **Agent runtime:** Which AI agent to run, mapped to specific commands inside the container:
-  - `claude-code` -> `claude --dangerously-skip-permissions` (permissions handled by sandbox isolation)
-  - `gemini-cli` -> `gemini`
+  - `claude-code` -> `claude --dangerously-skip-permissions` (permissions handled by sandbox isolation). Installed via official Anthropic install script.
+  - `gemini-cli` -> `gemini`. Installed via npm global install.
+- **Host agent config:** Optional read-write mount of the host agent's configuration directory (e.g., `~/.claude`) into the container for OAuth token synchronization. Sets the corresponding config directory environment variable (e.g., `CLAUDE_CONFIG_DIR`) so the agent can read and refresh tokens.
+- **Project name:** Optional override for the project identifier used in image and volume naming. Defaults to the parent directory name of the `.sandbox/` folder, sanitized to lowercase alphanumeric with hyphens.
 
 Example structure:
 ```yaml
 agent: claude-code
+project_name: my-app
 sdks:
   nodejs: "22"
   python: "3.12"
@@ -228,13 +236,18 @@ mounts:
   - source: .
     target: /workspace
 auto_isolate_deps: true
+host_agent_config:
+  source: "~/.claude"
+  target: "/opt/claude-config"
 secrets:
   - ANTHROPIC_API_KEY
 env:
+  GIT_AUTHOR_NAME: "Sandbox Agent"
+  GIT_AUTHOR_EMAIL: "sandbox@localhost"
   NODE_ENV: development
 ```
 
-When `auto_isolate_deps` is enabled, the sandbox scans all mounted project paths at launch for `package.json` files and creates anonymous Docker volume mounts over each sibling `node_modules/` directory. This prevents macOS-native compiled dependencies from clashing with the Linux sandbox environment. The scan is logged so the developer can see which directories were isolated.
+When `auto_isolate_deps` is enabled, the sandbox scans all mounted project paths at launch for `package.json` files and creates named Docker volume mounts over each sibling `node_modules/` directory. Volumes are named deterministically using the pattern `sandbox-<project_name>-<relative-path>-node_modules`, so they persist across sandbox restarts and avoid reinstallation. This prevents macOS-native compiled dependencies from clashing with the Linux sandbox environment. The scan is logged so the developer can see which directories were isolated.
 
 **Accepted edge case:** On a completely fresh project with no `package.json` files yet, the first sandbox launch will have no automatic mounts. This is acceptable because the agent will run `npm install` inside the Linux sandbox, producing Linux-native dependencies from the start -- no clash occurs.
 
@@ -250,6 +263,13 @@ When `auto_isolate_deps` is enabled, the sandbox scans all mounted project paths
 **Flags:**
 - `-f, --file` -- Path to config file (default: `.sandbox/config.yaml`)
 - `--help` for usage information
+
+**Exit Codes:**
+- `0` -- Success
+- `1` -- Configuration or general error
+- `2` -- Usage error (invalid command or flags)
+- `3` -- Missing dependency (Docker, yq, bash version)
+- `4` -- Secret validation error (declared secret not set in host environment)
 
 **Installation:** The script can be symlinked or copied to a PATH location (e.g., `/usr/local/bin/sandbox`) so it can be invoked as `sandbox` rather than `./sandbox.sh`.
 
@@ -267,25 +287,36 @@ When `auto_isolate_deps` is enabled, the sandbox scans all mounted project paths
 - Parses YAML configuration via `yq` (hard dependency -- eliminates fragile awk/sed parsing for nested structures)
 - Generates a Dockerfile from a `Dockerfile.template` shipped with the sandbox repo. The script reads config values via `yq`, substitutes placeholders in the template, and writes a resolved Dockerfile. The template is human-readable and inspectable.
 - Calls `docker build` and `docker run` directly
-- Manages image tagging/caching via content hash of config file + Dockerfile template + sandbox repo files (git wrapper, entrypoint scripts, agent instructions). Only rebuilds when any input changes.
+- Manages image tagging/caching via content hash of exactly five files: `config.yaml`, `Dockerfile.template`, `entrypoint.sh`, `git-wrapper.sh`, and `agent-instructions.md`. Only rebuilds when any of these inputs change.
 - Assembles Docker run flags for mounts, secrets, env vars, and TTY
 
-**Dependencies:** Docker (or Podman) and `yq` installed on the host. The script validates both are present at startup with clear error messages if missing.
+**Dependencies:** Docker (or Podman) and `yq` installed on the host. The script validates both are present at startup with error messages that name the missing dependency and state the required fix action.
 
 **Image build strategy:**
-- Base image pinned to digest for reproducibility
+- Base image (Ubuntu 24.04 LTS) pinned to digest for reproducibility
+- Tini installed as init process for proper signal forwarding and zombie process reaping
 - SDK installation via version managers or official binaries based on build arguments
-- MCP servers installed at build time
+- Rootless Podman 5.x installed from upstream Kubic/OBS repository with docker CLI alias (`podman-docker`) for agent compatibility
+- Docker Compose v2 installed as standalone binary
+- MCP servers installed at build time; MCP manifest embedded at `/etc/sandbox/mcp-servers.json`
+- Agent CLI installed at build time: Claude Code via official Anthropic install script, Gemini CLI via npm
+- Agent environment instruction files (`CLAUDE.md` or `GEMINI.md`) installed to agent config directory
 - Git wrapper and isolation boundaries baked into the image
 - Layer caching for fast rebuilds when only configuration changes
 
 **Runtime behavior:**
-- Container runs in TTY mode with stdin attached (`docker run -it`)
+- Container runs with Tini as PID 1 for signal forwarding, launching the entrypoint script
+- Entrypoint aligns sandbox user UID/GID with host via `HOST_UID`/`HOST_GID` environment variables (using `usermod`/`groupmod`) to ensure correct mount permissions
 - Project directory mounted at configured target path (paths resolved relative to config file location)
 - Secrets resolved from host environment variables and injected via `--env` flags (not written to filesystem)
-- Inner Docker available via rootless Docker, sysbox, or Podman (architecture decision deferred)
+- Host agent config directory (if configured) mounted read-write for OAuth token synchronization, with `CLAUDE_CONFIG_DIR` set for Claude Code
+- Inner containers available via rootless Podman with docker CLI alias. Podman runs daemonless with `vfs` storage driver, `netavark` networking with `aardvark-dns` for service name DNS resolution, and `file` events logger
+- Podman API socket started at `$XDG_RUNTIME_DIR/podman/podman.sock` with `DOCKER_HOST` pointing to it for Docker CLI compatibility
+- Healthcheck poller runs as a background daemon, polling containers every 10 seconds for health status (required because the container has no systemd to run healthcheck timers)
+- Testcontainers compatibility: Ryuk disabled, socket override configured, localhost host override set
+- MCP manifest merge at runtime: build-time manifest merged with project `.mcp.json` if present; project config takes precedence on name conflicts
 - Private network bridge for inner container communication
-- When `auto_isolate_deps` is enabled: at launch, scan mounted paths for `package.json` files, derive `node_modules/` sibling paths, and add anonymous volume mounts (`-v <container-path>/node_modules`) to the `docker run` invocation. Log each discovered mount. On fresh projects with no `package.json`, no mounts are added -- the agent creates Linux-native dependencies from scratch.
+- When `auto_isolate_deps` is enabled: at launch, scan mounted paths for `package.json` files, derive `node_modules/` sibling paths, and create named Docker volume mounts (`-v sandbox-<project>-<path>-node_modules:<container-path>/node_modules`) on the `docker run` invocation. Entrypoint fixes ownership of named volume mounts for the unprivileged sandbox user. Log each discovered mount. On fresh projects with no `package.json`, no mounts are added -- the agent creates Linux-native dependencies from scratch.
 
 ### Installation & Distribution
 
@@ -300,11 +331,11 @@ When `auto_isolate_deps` is enabled, the sandbox scans all mounted project paths
 - Bash for practical portability without POSIX contortions
 - `yq` for robust YAML parsing of nested config structures
 - Dockerfile.template with placeholder substitution for maintainable image generation
-- Content-hash-based image caching (config + template + sandbox files) for smart rebuild detection
+- Content-hash-based image caching (config.yaml + Dockerfile.template + entrypoint.sh + git-wrapper.sh + agent-instructions.md) for smart rebuild detection
 - Mount path resolution relative to config file location, not working directory
 - Clear error messages for missing dependencies, unset secrets, and invalid configuration
-- `auto_isolate_deps` scan: `find` for `package.json` files under mounted paths, derive sibling `node_modules` paths, assemble `-v` anonymous volume flags for `docker run`
-- Image naming convention: `sandbox-<project-name>:<content-hash>` for cache management
+- `auto_isolate_deps` scan: `find` for `package.json` files under mounted paths (excluding `node_modules` and symlinks), derive sibling `node_modules` paths, assemble named volume flags (`-v sandbox-<project>-<path>-node_modules:<target>`) for `docker run`. Entrypoint `chown`s named volume mounts for the unprivileged sandbox user
+- Image naming convention: `sandbox-<project-name>:<content-hash>` for cache management (first 12 characters of SHA256)
 
 ## Project Scoping & Phased Development
 
@@ -344,7 +375,8 @@ All of the following are non-negotiable for MVP -- removing any one breaks the c
 | Content-hash image caching | Avoid unnecessary rebuilds |
 | TTY mode with Ctrl+C lifecycle | Simple, no daemon complexity |
 | `yq` as hard dependency | Robust YAML parsing |
-| Auto dependency isolation (`auto_isolate_deps`) | Prevents macOS/Linux native module clashes in mounted project dirs |
+| Auto dependency isolation (`auto_isolate_deps`) | Prevents macOS/Linux native module clashes via named Docker volumes |
+| Host agent config mount (`host_agent_config`) | OAuth token synchronization for agent CLI authentication |
 
 **Explicitly deferred from MVP:**
 - Multi-agent parallel orchestration
@@ -373,7 +405,7 @@ All of the following are non-negotiable for MVP -- removing any one breaks the c
 ### Risk Mitigation Strategy
 
 **Technical Risks:**
-- **Docker isolation model (highest risk):** The choice between rootless Docker, sysbox, and Podman is the most consequential architecture decision. Mitigation: spike on all three early, pick the one that works on macOS (where Manuel develops) with least friction. If one approach fails, the others are fallbacks.
+- **Docker isolation model (resolved):** Rootless Podman was selected as the inner container runtime after evaluating rootless Docker, sysbox, and Podman. Podman's daemonless, rootless-by-default architecture provides the strongest isolation with the least friction on both macOS (via Docker Desktop) and Linux. The `vfs` storage driver ensures compatibility with nested container scenarios. Docker CLI compatibility is provided via the `podman-docker` alias package.
 - **Dockerfile.template complexity:** Template substitution for multiple SDKs and packages could get unwieldy. Mitigation: start with a simple template covering the most common case (Node.js + Playwright), extend incrementally.
 - **MCP server integration inside container:** Playwright MCP needs browser runtimes (chromium and webkit) inside Docker. Mitigation: validate Playwright in Docker early -- this is a known-solvable problem but requires correct base image and dependencies. WebKit requires significantly more system libraries (~60 packages including GTK4, GStreamer, Wayland) but is necessary for mobile device emulation tests.
 
@@ -396,9 +428,11 @@ All of the following are non-negotiable for MVP -- removing any one breaks the c
 - FR7: Developer can select which AI agent runtime to use (claude-code, gemini-cli)
 - FR8: Developer can override the default config file path with a `-f` flag
 - FR9: Developer can generate a starter configuration file with sensible defaults via `sandbox init`
-- FR9a: Developer can enable automatic dependency isolation (`auto_isolate_deps: true`) to create anonymous volume mounts over platform-specific dependency directories (e.g., `node_modules/`) within mounted project paths
-- FR9b: When `auto_isolate_deps` is enabled, the system scans mounted project paths at launch for `package.json` files and creates anonymous Docker volume mounts for each corresponding `node_modules/` directory
+- FR9a: Developer can enable automatic dependency isolation (`auto_isolate_deps: true`) to create named Docker volume mounts over platform-specific dependency directories (e.g., `node_modules/`) within mounted project paths
+- FR9b: When `auto_isolate_deps` is enabled, the system scans mounted project paths at launch for `package.json` files and creates named Docker volumes (pattern: `sandbox-<project>-<path>-node_modules`) for each corresponding `node_modules/` directory. Named volumes persist across sandbox restarts.
 - FR9c: The system logs all auto-detected dependency isolation mounts at launch so the developer has visibility into what was isolated
+- FR9d: Developer can configure a host agent configuration directory mount (`host_agent_config`) with source and target paths for OAuth token synchronization between host and sandbox
+- FR9e: Developer can optionally set `project_name` in configuration to override the default project identifier used for image and volume naming
 
 ### Sandbox Lifecycle
 
@@ -409,7 +443,7 @@ All of the following are non-negotiable for MVP -- removing any one breaks the c
 - FR14: Developer can stop a running sandbox session with Ctrl+C
 - FR15: System validates that required dependencies (Docker, yq) are present before proceeding
 - FR16: System validates that all declared secrets are set in the host environment before launching
-- FR16a: When `auto_isolate_deps` is enabled, the system creates anonymous volume mounts for each detected dependency directory during sandbox launch
+- FR16a: When `auto_isolate_deps` is enabled, the system creates named Docker volume mounts for each detected dependency directory during sandbox launch and ensures correct ownership for the unprivileged sandbox user
 
 ### Agent Runtime
 
@@ -434,7 +468,7 @@ All of the following are non-negotiable for MVP -- removing any one breaks the c
 
 ### Isolation Boundaries
 
-- FR31: System blocks git push operations, returning standard "unauthorized" errors
+- FR31: System blocks git push operations, returning standard authentication failure errors
 - FR32: System prevents agent access to host filesystem beyond explicitly mounted paths
 - FR33: System prevents agent access to host credentials, SSH keys, and cloud tokens not explicitly declared as secrets
 - FR34: System prevents inner containers from being reachable outside the sandbox network
@@ -448,9 +482,14 @@ All of the following are non-negotiable for MVP -- removing any one breaks the c
 - FR39: System pins base images to digest for reproducible builds
 - FR40: System passes SDK versions as build arguments to the Dockerfile
 - FR41: System installs configured MCP servers at image build time
-- FR42: System includes git push blocking and isolation boundary enforcement in the built image
+- FR42: System enforces git push blocking and isolation boundaries from within the sandbox image
 - FR43: System tags images using content hash of config + template + sandbox files for cache management
 - FR44: System installs agent environment instruction files (`CLAUDE.md`, `GEMINI.md`) into the sandbox user's home directory at image build time, providing the agent with sandbox-specific constraints (no sudo, container runtime details, Playwright usage, e2e test workflow) so it can operate without trial-and-error troubleshooting
+- FR45: When `host_agent_config` is configured, system mounts the host agent configuration directory read-write into the sandbox and sets the appropriate config directory environment variable (e.g., `CLAUDE_CONFIG_DIR`) for the agent runtime
+- FR46: System merges build-time MCP server manifest with project-level `.mcp.json` at runtime; project configuration takes precedence on name conflicts
+- FR47: System exits with specific exit codes to distinguish error categories: 0 (success), 1 (configuration error), 2 (usage error), 3 (missing dependency), 4 (secret validation failure)
+- FR48: System uses Tini as init process (PID 1) for proper signal forwarding and zombie process reaping
+- FR49: System aligns sandbox user UID/GID with host user at container startup to ensure correct file permissions on mounted directories
 
 ## Non-Functional Requirements
 
@@ -467,7 +506,7 @@ The security model protects against accidental leakage from AI agents that hallu
 
 ### Integration
 
-- NFR7: The CLI works with Docker Engine 20.10+ and is compatible with Podman as an alternative runtime
+- NFR7: The CLI works with Docker Engine 20.10+ on the host. Inside the sandbox, rootless Podman 5.x is the container runtime with docker CLI alias for agent compatibility
 - NFR8: YAML configuration is parsed via `yq` v4+ -- the script fails clearly if `yq` is not installed or is an incompatible version
 - NFR9: MCP servers installed in the sandbox follow the standard MCP protocol and are startable by any MCP-compatible agent
 - NFR10: The git wrapper is transparent to the agent for all operations except push -- git log, diff, commit, branch, etc. behave identically to standard git
@@ -476,5 +515,5 @@ The security model protects against accidental leakage from AI agents that hallu
 
 - NFR11: The CLI runs on macOS (arm64/amd64) and Linux (amd64) with bash 4+
 - NFR12: Image builds are reproducible -- the same config + template + sandbox files produce an identical image regardless of when or where the build runs (base image pinned to digest)
-- NFR13: The CLI fails fast with error messages that name the missing dependency, unset secret, or invalid field and state the required fix action
-- NFR14: A crashed or Ctrl+C'd sandbox leaves no orphaned containers or dangling networks on the host
+- NFR13: The CLI fails fast with error messages that name the missing dependency, unset secret, or invalid field and state the required fix action. Each error category returns a distinct exit code (1-4) for programmatic detection
+- NFR14: A crashed or Ctrl+C'd sandbox leaves no orphaned containers or dangling networks on the host. Tini as PID 1 ensures proper signal forwarding and cleanup of child processes

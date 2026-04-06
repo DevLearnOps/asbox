@@ -1,3 +1,6 @@
 .sandbox/
 .sandbox-Dockerfile
 .mcp.json
+
+_bmad/
+.claude/
