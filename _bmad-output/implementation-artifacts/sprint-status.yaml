@@ -1,6 +1,6 @@
-# generated: 2026-03-24
-# last_updated: 2026-04-06 (sprint-change-proposal: asbox Go rewrite)
-# project: asbox (formerly sandbox)
+# generated: 2026-04-08
+# last_updated: 2026-04-08
+# project: ai-sandbox
 # project_key: NOKEY
 # tracking_system: file-system
 # story_location: "{project-root}/_bmad-output/implementation-artifacts"
@@ -11,11 +11,10 @@
 #   - backlog: Epic not yet started
 #   - in-progress: Epic actively being worked on
 #   - done: All stories in epic completed
-#   - archived: Epic completed under previous implementation (bash), superseded by Go rewrite
 #
 # Epic Status Transitions:
-#   - backlog → in-progress: Automatically when first story is created (via create-story)
-#   - in-progress → done: Manually when all stories reach 'done' status
+#   - backlog -> in-progress: Automatically when first story is created (via create-story)
+#   - in-progress -> done: Manually when all stories reach 'done' status
 #
 # Story Status:
 #   - backlog: Story only exists in epic file
@@ -34,89 +33,68 @@
 # - Stories can be worked in parallel if team capacity allows
 # - SM typically creates next story after previous one is 'done' to incorporate learnings
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
-#
-# SPRINT CHANGE NOTE (2026-04-06):
-# ================================
-# Major course correction approved: rewrite from bash to Go, rebrand sandbox → asbox.
-# Epics 1-8 archived (bash implementation complete). New Epics 9-11 added for Go rewrite.
-# See: sprint-change-proposal-2026-04-06.md
 
-generated: 2026-03-24
-last_updated: "2026-04-06 (sprint-change-proposal: asbox Go rewrite)"
-project: asbox
+generated: "2026-04-08"
+last_updated: "2026-04-08"
+project: ai-sandbox
 project_key: NOKEY
 tracking_system: file-system
 story_location: "{project-root}/_bmad-output/implementation-artifacts"
 
 development_status:
-  # === ARCHIVED EPICS (bash implementation — completed, superseded by Go rewrite) ===
-
-  # Epic 1: Sandbox Foundation -- Developer Can Build and Launch a Sandbox
-  epic-1: archived
-  1-1-cli-skeleton-and-dependency-validation: done
-  1-2-configuration-initialization: done
-  1-3-configuration-parsing: done
-  1-4-dockerfile-generation-from-template: done
-  1-5-image-build-with-content-hash-caching: done
-  1-6-sandbox-run-with-tty-and-lifecycle: done
+  # Epic 1: Developer Can Build and Launch a Sandbox
+  epic-1: backlog
+  1-1-go-project-scaffold-and-cli-skeleton: backlog
+  1-2-configuration-parsing-and-validation: backlog
+  1-3-base-dockerfile-template: backlog
+  1-4-sdk-installation-blocks-in-dockerfile-template: backlog
+  1-5-container-scripts-and-tooling-in-dockerfile-template: backlog
+  1-6-image-build-with-content-hash-caching: backlog
+  1-7-sandbox-run-with-tty-and-lifecycle: backlog
+  1-8-configuration-initialization: backlog
   epic-1-retrospective: optional
 
-  # Epic 2: Project Integration -- Agent Can Work With Project Files and Git
-  epic-2: archived
-  2-1-host-directory-mounts: done
-  2-2-secret-injection-and-validation: done
-  2-3-agent-runtime-with-project-files-and-bmad-support: done
-  2-4-git-and-cli-toolchain: done
+  # Epic 2: Agent Can Work With Project Files and Git
+  epic-2: backlog
+  2-1-host-directory-mounts-and-secret-injection: backlog
+  2-2-development-toolchain-verification: backlog
   epic-2-retrospective: optional
 
-  # Epic 3: Isolation Boundaries -- Sandbox Enforces Security Constraints
-  epic-3: archived
-  3-1-git-push-blocking: done
-  3-2-filesystem-and-credential-isolation: done
+  # Epic 3: Sandbox Enforces Isolation Boundaries
+  epic-3: backlog
+  3-1-git-push-blocking-and-filesystem-isolation: backlog
   epic-3-retrospective: optional
 
-  # Epic 4: Inner Container Runtime -- Agent Can Build and Run Docker Services
-  epic-4: archived
-  4-1-podman-installation-and-docker-alias: done
-  4-2-building-and-running-inner-containers: done
-  4-3-isolation-scripts-baked-into-image: done
-  4-4-agent-cli-installation: done
+  # Epic 4: Agent Can Build and Run Docker Services
+  epic-4: backlog
+  4-1-podman-installation-and-docker-alias: backlog
+  4-2-inner-container-building-and-orchestration: backlog
   epic-4-retrospective: optional
 
-  # Epic 5: MCP Integration -- Agent Can Run Browser Tests via Playwright
-  epic-5: archived
-  5-1-mcp-server-installation-at-build-time: done
-  5-2-mcp-configuration-generation-and-merge: done
+  # Epic 5: Agent Can Run Browser Tests via MCP
+  epic-5: backlog
+  5-1-mcp-server-installation-and-configuration-merge: backlog
   epic-5-retrospective: optional
 
-  # Epic 6: Host Agent Config Inheritance (tech spec)
-  epic-6: archived
-  6-1-host-agent-config-inheritance: done
+  # Epic 6: Developer Can Isolate Platform Dependencies Automatically
+  epic-6: backlog
+  6-1-auto-dependency-isolation-via-named-volumes: backlog
   epic-6-retrospective: optional
 
-  # Epic 7: Sandbox Runtime Hardening (sprint change proposal 2026-03-25)
-  epic-7: archived
-  7-1-fix-playwright-system-dependencies: done
-  7-2-fix-docker-compose-plugin-registration: done
-  7-3-migrate-claude-cli-to-official-install-script: done
-  7-4-investigate-fix-host-agent-config-mount: done
+  # Epic 7: Developer Can Share Host Agent Authentication
+  epic-7: backlog
+  7-1-host-agent-config-mount-for-oauth-token-sync: backlog
   epic-7-retrospective: optional
 
-  # Epic 8: Auto Dependency Isolation -- Prevent Cross-Platform Module Clashes
-  epic-8: archived
-  8-1-auto-dependency-isolation-via-named-volumes: done
+  # Epic 8: Developer Can Run Multi-Repo BMAD Workflows
+  epic-8: backlog
+  8-1-bmad-multi-repo-mounts-and-agent-instructions: backlog
   epic-8-retrospective: optional
 
-  # === NEW EPICS (Go rewrite — asbox) ===
-
-  # Epic 9: Go CLI Foundation
+  # Epic 9: Integration Test Suite Validates All Use Cases
   epic-9: backlog
+  9-1-integration-test-infrastructure: backlog
+  9-2-lifecycle-and-mount-tests: backlog
+  9-3-isolation-and-inner-container-tests: backlog
+  9-4-mcp-auto-isolate-deps-and-bmad-repos-tests: backlog
   epic-9-retrospective: optional
-
-  # Epic 10: BMAD Multi-Repo Workflow
-  epic-10: backlog
-  epic-10-retrospective: optional
-
-  # Epic 11: Integration Test Suite
-  epic-11: backlog
-  epic-11-retrospective: optional

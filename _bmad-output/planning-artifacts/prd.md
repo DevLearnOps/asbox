@@ -22,6 +22,8 @@ workflowType: 'prd'
 lastEdited: '2026-04-06'
 editHistory:
   - date: '2026-04-06'
+    changes: 'Major course correction: rebrand sandbox → asbox (Agent-SandBox), rewrite from bash to Go CLI, single binary distribution with embedded assets, add bmad_repos multi-repo workflow support, add integration test coverage requirements. New FRs: FR50-FR54. Modified FRs: FR9, FR15, FR38, FR43, FR47. Modified NFRs: NFR8, NFR11. New NFR: NFR15. Per sprint-change-proposal-2026-04-06.md.'
+  - date: '2026-04-06'
     changes: 'Comprehensive alignment with implementation: named Docker volumes (not anonymous) for auto_isolate_deps, Podman chosen as inner container runtime (no longer deferred), added host_agent_config and project_name config options, documented Tini init process, UID/GID alignment, healthcheck poller, Testcontainers compatibility, MCP manifest merge behavior, specific exit codes, content hash file list, Claude CLI official install script. Fixed implementation leakage in FR31/FR42/FR16a and NFR13 subjectivity per validation report.'
   - date: '2026-03-31'
     changes: 'Added webkit browser support for mobile device emulation, agent environment instruction files (CLAUDE.md/GEMINI.md) baked into sandbox image'
@@ -39,28 +41,28 @@ classification:
   projectContext: greenfield
 ---
 
-# Product Requirements Document - sandbox
+# Product Requirements Document - asbox
 
 **Author:** Manuel
 **Date:** 2026-03-23
 
 ## Executive Summary
 
-Sandbox is a containerized development environment that enables AI coding agents (Claude Code, Gemini CLI) to operate with full development capability and no implicit access to host resources. It solves a specific bottleneck in AI-assisted development: the human overhead of supervising agents that have broad system access. By constraining the environment rather than the agent, sandbox lets developers fire off tasks and walk away -- no permission prompts, no fear of broken host systems, no leaked credentials.
+asbox (Agent-SandBox) is a containerized development environment that enables AI coding agents (Claude Code, Gemini CLI) to operate with full development capability and no implicit access to host resources. It solves a specific bottleneck in AI-assisted development: the human overhead of supervising agents that have broad system access. By constraining the environment rather than the agent, asbox lets developers fire off tasks and walk away -- no permission prompts, no fear of broken host systems, no leaked credentials.
 
-The target users are development teams building AI-native applications who need to delegate complex, multi-step tasks to coding agents without constant oversight. Sandbox provides agents with everything they need -- project files, local git, internet access, Docker, CLI tools, configurable SDKs, and MCP integrations for browser automation -- while enforcing hard boundaries: no host credentials or SSH keys by default, no remote git pushes, and no host filesystem access beyond explicitly mounted project paths. Developers may opt in to providing scoped secrets (e.g., private registry tokens) when a task requires them.
+The target users are development teams building AI-native applications who need to delegate complex, multi-step tasks to coding agents without constant oversight. asbox provides agents with everything they need -- project files, local git, internet access, Docker, CLI tools, configurable SDKs, and MCP integrations for browser automation -- while enforcing hard boundaries: no host credentials or SSH keys by default, no remote git pushes, and no host filesystem access beyond explicitly mounted project paths. Developers may opt in to providing scoped secrets (e.g., private registry tokens) when a task requires them.
 
-Sandbox sessions are configurable -- ephemeral for throwaway experimentation or persistent for multi-session work where git history and build artifacts carry forward. Distributed as source code, developers build and configure their own instances with the specific SDK versions, tools, and MCP servers their projects require.
+Sandbox sessions are configurable -- ephemeral for throwaway experimentation or persistent for multi-session work where git history and build artifacts carry forward. Distributed as a single Go binary, developers configure their instances with the specific SDK versions, tools, and MCP servers their projects require.
 
 ### What Makes This Special
 
-The insight behind sandbox is that agent capability is not the bottleneck -- supervision cost is. Current approaches force a choice: either restrict the agent (losing productivity) or trust it with full access (risking damage). Sandbox eliminates this tradeoff. Agents get a complete, realistic development environment with internet, Docker, and real toolchains. Developers get a guarantee that nothing outside the container is affected unless they explicitly allow it.
+The insight behind asbox is that agent capability is not the bottleneck -- supervision cost is. Current approaches force a choice: either restrict the agent (losing productivity) or trust it with full access (risking damage). asbox eliminates this tradeoff. Agents get a complete, realistic development environment with internet, Docker, and real toolchains. Developers get a guarantee that nothing outside the container is affected unless they explicitly allow it.
 
 The deliberate tension in the design is Docker access: it's the widest capability surface and the point where containment must be most carefully enforced. This is a known trade-off -- agents need Docker to build images and test services, and the sandbox must ensure this access cannot be used to escape the container boundary.
 
 ## Project Classification
 
-- **Project Type:** Developer Tool -- source-distributed, locally built containerized environment
+- **Project Type:** Developer Tool -- single Go binary, containerized environment manager
 - **Domain:** Software Development Tooling
 - **Complexity:** Medium -- container orchestration, security boundaries, multi-SDK configuration, MCP integration
 - **Project Context:** Greenfield
@@ -99,7 +101,7 @@ The deliberate tension in the design is Docker access: it's the widest capabilit
 
 Manuel is a developer building an AI-native application. He has a story spec ready from a BMAD planning session and wants the agent to handle the full implementation. Today, he'd run Claude Code on his host machine, babysitting it through permission prompts and worrying about it touching things it shouldn't.
 
-With sandbox, Manuel opens his terminal and launches a sandbox instance for his project, mounting the project directory and passing his Anthropic API key as a scoped secret. The sandbox spins up with Node.js 22, Playwright, and Docker pre-configured. He starts a Claude Code session inside, gives it the story spec, and tells it: "Implement this story, write E2E tests, build the Docker image, run docker compose up, and verify the app with Playwright."
+With asbox, Manuel opens his terminal and launches a sandbox instance for his project, mounting the project directory and passing his Anthropic API key as a scoped secret. The sandbox spins up with Node.js 22, Playwright, and Docker pre-configured. He starts a Claude Code session inside, gives it the story spec, and tells it: "Implement this story, write E2E tests, build the Docker image, run docker compose up, and verify the app with Playwright."
 
 Manuel closes his laptop and goes to lunch. The agent works through the BMAD workflow -- reading the story spec, implementing the code, writing Playwright E2E tests, building the Dockerfile, running `docker compose up`, hitting the app's ports from Playwright, and iterating until tests pass. It commits each logical change to local git.
 
@@ -111,9 +113,9 @@ Manuel comes back, opens the project directory, and reviews the git log. The cod
 
 Manuel launches a sandbox and kicks off an agent task, but when he comes back, the agent has stalled. It tried to install a Python package that requires a C compiler not included in the sandbox image. The chat history shows the agent attempted the install, got the error, tried a workaround, and eventually gave up.
 
-Manuel reads the error, realizes he needs to add `build-essential` to his sandbox configuration. He updates the build arguments, rebuilds the sandbox image, and relaunches. This time the agent completes the task successfully.
+Manuel reads the error, realizes he needs to add `build-essential` to his asbox configuration. He updates the build arguments, rebuilds the sandbox image, and relaunches. This time the agent completes the task successfully.
 
-In another scenario, Manuel launches a sandbox for a Node.js project he's been developing on macOS. The agent tries to run the app but crashes on a native module compiled for Darwin. Manuel adds `auto_isolate_deps: true` to his config and relaunches. The sandbox detects three `package.json` files (root, `packages/api`, `packages/web`), creates named Docker volumes for each `node_modules/` directory (e.g., `sandbox-myproject-packages-api-node_modules`), logs the isolation mounts, and the agent runs `npm install` inside the sandbox to get Linux-native binaries. Everything works. Named volumes persist across sandbox restarts, so subsequent launches reuse the Linux-native dependencies without reinstalling.
+In another scenario, Manuel launches a sandbox for a Node.js project he's been developing on macOS. The agent tries to run the app but crashes on a native module compiled for Darwin. Manuel adds `auto_isolate_deps: true` to his config and relaunches. asbox detects three `package.json` files (root, `packages/api`, `packages/web`), creates named Docker volumes for each `node_modules/` directory (e.g., `asbox-myproject-packages-api-node_modules`), logs the isolation mounts, and the agent runs `npm install` inside the sandbox to get Linux-native binaries. Everything works. Named volumes persist across sandbox restarts, so subsequent launches reuse the Linux-native dependencies without reinstalling.
 
 In another scenario, the agent tries to `git push` to the remote. It gets "unauthorized" and moves on -- it logs the commit locally and notes in the chat that it couldn't push. Manuel sees this when he reviews and pushes manually from his host. No damage done.
 
@@ -121,11 +123,11 @@ In another scenario, the agent tries to `git push` to the remote. It gets "unaut
 
 ### Journey 3: Manuel Sets Up a New Project's Sandbox (Builder/Maintainer)
 
-Manuel's team is starting a new project that uses Go 1.23 and PostgreSQL. Manuel needs a sandbox configured for this stack. He looks at the sandbox configuration file, sets the Go version, adds PostgreSQL as a Docker Compose service, and includes the necessary CLI tools. He builds the image.
+Manuel's team is starting a new project that uses Go 1.23 and PostgreSQL. Manuel needs a sandbox configured for this stack. He looks at the asbox configuration file, sets the Go version, adds PostgreSQL as a Docker Compose service, and includes the necessary CLI tools. He builds the image.
 
 He tests it by launching a sandbox, starting a quick Claude Code session, and asking the agent to scaffold a Go project, write a database migration, and run it against the PostgreSQL container. Everything works. He shares the configuration file with his team so they can build the same sandbox image.
 
-**Capabilities revealed:** Configuration-driven SDK versioning, Docker Compose service definitions, sandbox image build process, shareable configuration, team distribution via source code.
+**Capabilities revealed:** Configuration-driven SDK versioning, Docker Compose service definitions, sandbox image build process, shareable configuration, team distribution via single binary.
 
 ### Journey 4: The Agent's Perspective (AI Agent - Inside the Sandbox)
 
@@ -161,7 +163,7 @@ At no point does the agent encounter the developer's SSH keys, cloud credentials
 
 ### Detected Innovation Areas
 
-**IDE-Agnostic Agent Isolation:** Existing sandboxed development environments (dev containers, Codespaces) operate at the IDE extension layer -- they define what's inside the environment and assume a VS Code-compatible client. Sandbox operates at a different layer entirely: it defines what can't get out. The agent works in a terminal, decoupled from any editor or IDE. Any workflow, any editor, any automation pipeline can interact with it. This is not competing with dev containers -- it's a containment boundary, not an IDE protocol.
+**IDE-Agnostic Agent Isolation:** Existing sandboxed development environments (dev containers, Codespaces) operate at the IDE extension layer -- they define what's inside the environment and assume a VS Code-compatible client. asbox operates at a different layer entirely: it defines what can't get out. The agent works in a terminal, decoupled from any editor or IDE. Any workflow, any editor, any automation pipeline can interact with it. This is not competing with dev containers -- it's a containment boundary, not an IDE protocol.
 
 **Stage-Gated Autonomy Model:** Rather than binary "supervised vs unsupervised," sandbox enables a stage-gated autonomy pattern. Developers delegate an entire stage of work (e.g., a full BMAD story with dozens of subtasks), the agent self-assesses and iterates within that stage, and the human reviews only at stage boundaries. This is a novel trust model -- the blast radius is constrained by the environment, so the agent can be trusted with longer autonomous runs.
 
@@ -196,28 +198,33 @@ The sandbox passes validation when all adversarial scenarios fail with standard 
 - **Git push isolation:** Implemented via a git wrapper that allows all commands except `push`, returning standard "unauthorized" errors. Simpler and more testable than network-level blocking.
 - **Build reproducibility:** Base images pinned to digest (not tag) to prevent silent drift. SDK versions set via explicit build arguments.
 - **MCP server lifecycle:** MCP servers (Playwright, etc.) are pre-installed in the sandbox image. The agent starts them as needed via MCP protocol. No pre-running processes required at sandbox launch.
+- **Dockerfile.template complexity (mitigated):** Go's `text/template` with conditional blocks (`{{if}}`, `{{range}}`) and typed config structs provides robust, readable template logic. No longer a significant risk compared to the previous bash sed substitution approach.
+- **Go rewrite migration risk:** The entire CLI is being rewritten from bash to Go. Mitigation: the container-side scripts (entrypoint.sh, git-wrapper.sh, healthcheck-poller.sh) remain bash and are unchanged -- the rewrite scope is limited to the host-side CLI. All existing functional behavior is preserved; only the implementation technology changes.
+- **Embedded asset drift risk:** Supporting files compiled into the binary cannot be patched without rebuilding. Mitigation: this is intentional -- it ensures consistency between the CLI version and its embedded assets. Version-tagged releases make the relationship explicit.
+- **BMAD multi-repo mount complexity:** Mounting multiple external repositories with generated agent instructions adds configuration surface area. Mitigation: `bmad_repos` is a flat list of paths with convention-based target mapping (`/workspace/repos/<name>`). The generated agent instructions file uses a Go template with the repo list -- no user configuration beyond the path list.
 
 ## Developer Tool Specific Requirements
 
 ### Project-Type Overview
 
-Sandbox is a shell script CLI that wraps Docker operations to provide AI coding agents with isolated development environments. The user interface is entirely terminal-based: a configuration file defines the environment, and a shell script handles build and run operations. There is no GUI, no web interface, no IDE plugin.
+asbox is a Go CLI binary that wraps Docker operations to provide AI coding agents with isolated development environments. The user interface is entirely terminal-based: a configuration file defines the environment, and the CLI handles build and run operations. There is no GUI, no web interface, no IDE plugin.
 
 ### Configuration Surface
 
-The sandbox configuration file (`.sandbox/config.yaml` by default) is the primary interface for defining a sandbox environment. It specifies:
+The asbox configuration file (`.asbox/config.yaml` by default) is the primary interface for defining a sandbox environment. It specifies:
 
 - **SDK versions:** Node.js, Go, Python, and other runtimes with explicit version pinning
 - **System packages:** Additional OS-level packages needed (e.g., build-essential, libpq-dev)
 - **MCP servers:** Which MCP integrations to pre-install (e.g., Playwright)
 - **Mounts:** Host directories to mount into the sandbox (project files, shared assets). Relative paths are resolved relative to the config file location, not the working directory.
-- **Secrets:** Names of host environment variables to inject into the sandbox. The config declares which secrets are needed; the script resolves their values from the host environment at runtime and passes them via `docker run --env`. If a declared secret is not set in the host environment, the script errors with a clear message. Secrets never appear in the config file.
+- **Secrets:** Names of host environment variables to inject into the sandbox. The config declares which secrets are needed; the CLI resolves their values from the host environment at runtime and passes them via `docker run --env`. If a declared secret is not set in the host environment, the CLI errors with a clear message. Secrets never appear in the config file.
 - **Environment variables:** Non-secret configuration for the agent runtime
 - **Agent runtime:** Which AI agent to run, mapped to specific commands inside the container:
   - `claude-code` -> `claude --dangerously-skip-permissions` (permissions handled by sandbox isolation). Installed via official Anthropic install script.
   - `gemini-cli` -> `gemini`. Installed via npm global install.
 - **Host agent config:** Optional read-write mount of the host agent's configuration directory (e.g., `~/.claude`) into the container for OAuth token synchronization. Sets the corresponding config directory environment variable (e.g., `CLAUDE_CONFIG_DIR`) so the agent can read and refresh tokens.
-- **Project name:** Optional override for the project identifier used in image and volume naming. Defaults to the parent directory name of the `.sandbox/` folder, sanitized to lowercase alphanumeric with hyphens.
+- **Project name:** Optional override for the project identifier used in image and volume naming. Defaults to the parent directory name of the `.asbox/` folder, sanitized to lowercase alphanumeric with hyphens.
+- **BMAD multi-repo workflow (`bmad_repos`):** A list of local paths to checked-out repositories. When configured, the system automatically creates mounts for each repository into `/workspace/repos/<repo_name>` inside the sandbox container. An agent configuration file (e.g., `CLAUDE.md`) is generated and mounted that instructs the agent to perform git operations and code changes within the relevant repositories under the `repos/` directory. This enables development workflows that span multiple repositories as a unified workspace.
 
 Example structure:
 ```yaml
@@ -239,6 +246,10 @@ auto_isolate_deps: true
 host_agent_config:
   source: "~/.claude"
   target: "/opt/claude-config"
+bmad_repos:
+  - /Users/manuel/repos/frontend-app
+  - /Users/manuel/repos/api-service
+  - /Users/manuel/repos/shared-lib
 secrets:
   - ANTHROPIC_API_KEY
 env:
@@ -247,50 +258,52 @@ env:
   NODE_ENV: development
 ```
 
-When `auto_isolate_deps` is enabled, the sandbox scans all mounted project paths at launch for `package.json` files and creates named Docker volume mounts over each sibling `node_modules/` directory. Volumes are named deterministically using the pattern `sandbox-<project_name>-<relative-path>-node_modules`, so they persist across sandbox restarts and avoid reinstallation. This prevents macOS-native compiled dependencies from clashing with the Linux sandbox environment. The scan is logged so the developer can see which directories were isolated.
+When `auto_isolate_deps` is enabled, asbox scans all mounted project paths at launch for `package.json` files and creates named Docker volume mounts over each sibling `node_modules/` directory. Volumes are named deterministically using the pattern `asbox-<project_name>-<relative-path>-node_modules`, so they persist across sandbox restarts and avoid reinstallation. This prevents macOS-native compiled dependencies from clashing with the Linux sandbox environment. The scan is logged so the developer can see which directories were isolated.
 
 **Accepted edge case:** On a completely fresh project with no `package.json` files yet, the first sandbox launch will have no automatic mounts. This is acceptable because the agent will run `npm install` inside the Linux sandbox, producing Linux-native dependencies from the start -- no clash occurs.
 
 ### CLI Interface
 
-**Script:** `sandbox.sh` (bash shell script)
+**Binary:** `asbox` (Go CLI)
 
 **Commands:**
-- `sandbox build` -- Builds the sandbox container image from configuration. Reads `.sandbox/config.yaml` by default, override with `-f path/to/config.yaml`.
-- `sandbox run` -- Builds if image not present, then launches the sandbox in TTY mode with the configured agent. Override config with `-f`. The container runs interactively; Ctrl+C stops it.
-- `sandbox init` -- Generates a starter `.sandbox/config.yaml` with sensible defaults and inline comments.
+- `asbox build` -- Builds the sandbox container image from configuration. Reads `.asbox/config.yaml` by default, override with `-f path/to/config.yaml`.
+- `asbox run` -- Builds if image not present, then launches the sandbox in TTY mode with the configured agent. Override config with `-f`. The container runs interactively; Ctrl+C stops it.
+- `asbox init` -- Generates a starter `.asbox/config.yaml` with sensible defaults and inline comments.
 
 **Flags:**
-- `-f, --file` -- Path to config file (default: `.sandbox/config.yaml`)
+- `-f, --file` -- Path to config file (default: `.asbox/config.yaml`)
 - `--help` for usage information
 
 **Exit Codes:**
 - `0` -- Success
 - `1` -- Configuration or general error
 - `2` -- Usage error (invalid command or flags)
-- `3` -- Missing dependency (Docker, yq, bash version)
+- `3` -- Missing dependency (Docker not found)
 - `4` -- Secret validation error (declared secret not set in host environment)
 
-**Installation:** The script can be symlinked or copied to a PATH location (e.g., `/usr/local/bin/sandbox`) so it can be invoked as `sandbox` rather than `./sandbox.sh`.
+**Installation:** Distributed as a single statically-linked Go binary. Download or `go install` and place on PATH. All supporting files (Dockerfile template, entrypoint script, git wrapper, agent instructions, config template) are embedded in the binary.
 
 **Design principles:**
 - Minimal command surface -- three commands cover the full workflow (init, build, run)
 - Build-if-needed on `run` eliminates manual build steps for common use
 - TTY mode means the developer sees agent output in real-time if they choose to watch, or can background/detach
 - No daemon, no server, no background processes -- the sandbox lifecycle is the process lifecycle
-- Zero compilation step -- the script runs directly
+- Zero external dependencies -- single binary with embedded assets, only Docker required on host
 
 ### Technical Architecture Considerations
 
-**Shell script structure:**
-- Bash (not POSIX) -- arrays, string manipulation, and `yq` integration require bash features. Every macOS and Linux system has bash.
-- Parses YAML configuration via `yq` (hard dependency -- eliminates fragile awk/sed parsing for nested structures)
-- Generates a Dockerfile from a `Dockerfile.template` shipped with the sandbox repo. The script reads config values via `yq`, substitutes placeholders in the template, and writes a resolved Dockerfile. The template is human-readable and inspectable.
-- Calls `docker build` and `docker run` directly
-- Manages image tagging/caching via content hash of exactly five files: `config.yaml`, `Dockerfile.template`, `entrypoint.sh`, `git-wrapper.sh`, and `agent-instructions.md`. Only rebuilds when any of these inputs change.
+**Go CLI structure:**
+- Single `asbox` binary built from Go, with cobra (or similar) CLI framework for command dispatch (init, build, run)
+- YAML configuration parsed via Go's `gopkg.in/yaml.v3` -- no external yq dependency
+- Dockerfile generated from embedded Go `text/template` templates with conditional logic and value substitution -- replaces fragile sed-based placeholder stripping
+- All supporting files embedded via Go's `embed` package: Dockerfile template, entrypoint.sh, git-wrapper.sh, healthcheck-poller.sh, agent-instructions.md, starter config.yaml
+- Calls `docker build` and `docker run` via `os/exec`
+- Content-hash caching via Go's `crypto/sha256` over rendered template output + config content
+- Structured error handling with typed errors and distinct exit codes
 - Assembles Docker run flags for mounts, secrets, env vars, and TTY
 
-**Dependencies:** Docker (or Podman) and `yq` installed on the host. The script validates both are present at startup with error messages that name the missing dependency and state the required fix action.
+**Dependencies:** Docker (or Podman) on the host. No other external dependencies -- single statically-linked binary. The CLI validates Docker is present at startup with error messages that name the missing dependency and state the required fix action.
 
 **Image build strategy:**
 - Base image (Ubuntu 24.04 LTS) pinned to digest for reproducibility
@@ -316,26 +329,29 @@ When `auto_isolate_deps` is enabled, the sandbox scans all mounted project paths
 - Testcontainers compatibility: Ryuk disabled, socket override configured, localhost host override set
 - MCP manifest merge at runtime: build-time manifest merged with project `.mcp.json` if present; project config takes precedence on name conflicts
 - Private network bridge for inner container communication
-- When `auto_isolate_deps` is enabled: at launch, scan mounted paths for `package.json` files, derive `node_modules/` sibling paths, and create named Docker volume mounts (`-v sandbox-<project>-<path>-node_modules:<container-path>/node_modules`) on the `docker run` invocation. Entrypoint fixes ownership of named volume mounts for the unprivileged sandbox user. Log each discovered mount. On fresh projects with no `package.json`, no mounts are added -- the agent creates Linux-native dependencies from scratch.
+- When `auto_isolate_deps` is enabled: at launch, scan mounted paths for `package.json` files, derive `node_modules/` sibling paths, and create named Docker volume mounts (`-v asbox-<project>-<path>-node_modules:<container-path>/node_modules`) on the `docker run` invocation. Entrypoint fixes ownership of named volume mounts for the unprivileged sandbox user. Log each discovered mount. On fresh projects with no `package.json`, no mounts are added -- the agent creates Linux-native dependencies from scratch.
+- When `bmad_repos` is configured: each listed repository path is mounted into `/workspace/repos/<repo_name>` inside the container. An agent configuration file (e.g., `CLAUDE.md`) is generated from a Go template containing the list of mounted repositories and instructions for the agent to perform git operations and code changes within the `repos/` directory. This file is mounted into the container at the agent's expected configuration location.
 
 ### Installation & Distribution
 
-- Distributed as source code via git repository
-- No build step -- `sandbox.sh` runs directly
-- Dependencies: Docker (or Podman) and `yq` on the host
-- Optional: symlink to PATH for ergonomic `sandbox` command
-- Documentation in project README and `sandbox --help`
+- Distributed as a single statically-linked Go binary
+- Pre-built binaries for macOS (arm64/amd64) and Linux (amd64) via GitHub releases
+- Alternatively: `go install` from source
+- Dependencies: Docker (or Podman) on the host -- no other external dependencies
+- Documentation in project README and `asbox --help`
 
 ### Implementation Considerations
 
-- Bash for practical portability without POSIX contortions
-- `yq` for robust YAML parsing of nested config structures
-- Dockerfile.template with placeholder substitution for maintainable image generation
-- Content-hash-based image caching (config.yaml + Dockerfile.template + entrypoint.sh + git-wrapper.sh + agent-instructions.md) for smart rebuild detection
+- Go for type safety, parallel test execution, embedded assets, and native YAML/template support
+- `gopkg.in/yaml.v3` for YAML parsing -- no external dependencies
+- Go `text/template` for Dockerfile rendering with conditional blocks and value injection
+- Go `embed` package for all supporting files: Dockerfile template, entrypoint.sh, git-wrapper.sh, healthcheck-poller.sh, agent-instructions.md, starter config template
+- Content-hash-based image caching over rendered template output + config content for smart rebuild detection
 - Mount path resolution relative to config file location, not working directory
-- Clear error messages for missing dependencies, unset secrets, and invalid configuration
-- `auto_isolate_deps` scan: `find` for `package.json` files under mounted paths (excluding `node_modules` and symlinks), derive sibling `node_modules` paths, assemble named volume flags (`-v sandbox-<project>-<path>-node_modules:<target>`) for `docker run`. Entrypoint `chown`s named volume mounts for the unprivileged sandbox user
-- Image naming convention: `sandbox-<project-name>:<content-hash>` for cache management (first 12 characters of SHA256)
+- Structured error types with clear messages for missing dependencies, unset secrets, and invalid configuration
+- `auto_isolate_deps` scan: `filepath.WalkDir` for `package.json` files under mounted paths, excluding `node_modules`; named volume flags assembled programmatically (`-v asbox-<project>-<path>-node_modules:<target>`). Entrypoint `chown`s named volume mounts for the unprivileged sandbox user
+- `bmad_repos` mount assembly: each repo path mounted to `/workspace/repos/<basename>`, agent instruction file generated via Go template and mounted into container
+- Image naming convention: `asbox-<project-name>:<content-hash>` for cache management (first 12 characters of SHA256)
 
 ## Project Scoping & Phased Development
 
@@ -359,22 +375,23 @@ All of the following are non-negotiable for MVP -- removing any one breaks the c
 
 | Capability | Rationale |
 |---|---|
-| Shell CLI (init, build, run) | Primary user interface -- no CLI, no product |
-| `.sandbox/config.yaml` configuration | Drives everything -- SDKs, mounts, secrets, agent selection |
-| Dockerfile.template generation | Config-driven builds are the core value over manual Docker |
+| Go CLI binary (init, build, run) | Primary user interface -- no CLI, no product |
+| `.asbox/config.yaml` configuration | Drives everything -- SDKs, mounts, secrets, agent selection |
+| Embedded Dockerfile template generation | Config-driven builds are the core value over manual Docker |
+| Embedded assets via Go `embed` | Single binary distribution -- no external files to manage |
 | Configurable SDK versions (Node.js, Go, Python) | Different projects need different stacks |
 | Docker and Docker Compose inside sandbox | Agents must build images and run services to test |
 | Non-privileged inner Docker (rootless/sysbox/Podman) | Isolation is the product -- privileged mode defeats the purpose |
-| Playwright MCP integration (chromium + webkit) | E2E testing is part of the inner development loop — webkit required for mobile device emulation |
+| Playwright MCP integration (chromium + webkit) | E2E testing is part of the inner development loop -- webkit required for mobile device emulation |
 | Local-only git (push blocked via wrapper) | Core isolation boundary |
 | Scoped secrets injection (host env -> container env) | Agent needs API keys, nothing else |
 | Internet access (outbound) | Agent must fetch docs, packages, dependencies |
 | Common CLI tools (curl, wget, dig, etc.) | Standard development workflow |
 | BMAD method support | Full planning-through-implementation workflow inside sandbox |
+| BMAD multi-repo workflow (`bmad_repos`) | Multi-repository development workflows with auto-generated agent instructions |
 | Base image pinned to digest | Build reproducibility |
 | Content-hash image caching | Avoid unnecessary rebuilds |
 | TTY mode with Ctrl+C lifecycle | Simple, no daemon complexity |
-| `yq` as hard dependency | Robust YAML parsing |
 | Auto dependency isolation (`auto_isolate_deps`) | Prevents macOS/Linux native module clashes via named Docker volumes |
 | Host agent config mount (`host_agent_config`) | OAuth token synchronization for agent CLI authentication |
 
@@ -406,14 +423,13 @@ All of the following are non-negotiable for MVP -- removing any one breaks the c
 
 **Technical Risks:**
 - **Docker isolation model (resolved):** Rootless Podman was selected as the inner container runtime after evaluating rootless Docker, sysbox, and Podman. Podman's daemonless, rootless-by-default architecture provides the strongest isolation with the least friction on both macOS (via Docker Desktop) and Linux. The `vfs` storage driver ensures compatibility with nested container scenarios. Docker CLI compatibility is provided via the `podman-docker` alias package.
-- **Dockerfile.template complexity:** Template substitution for multiple SDKs and packages could get unwieldy. Mitigation: start with a simple template covering the most common case (Node.js + Playwright), extend incrementally.
 - **MCP server integration inside container:** Playwright MCP needs browser runtimes (chromium and webkit) inside Docker. Mitigation: validate Playwright in Docker early -- this is a known-solvable problem but requires correct base image and dependencies. WebKit requires significantly more system libraries (~60 packages including GTK4, GStreamer, Wayland) but is necessary for mobile device emulation tests.
 
 **Market Risks:**
 - Minimal -- this is a personal tool first. The market validation is: does Manuel use it daily? If yes, extend to team. If the team uses it daily, consider broader distribution.
 
 **Resource Risks:**
-- Solo developer means serial execution. The MVP feature set is large but each piece is well-understood (shell scripting, Docker, git hooks). The risk is calendar time, not complexity. Mitigation: build in the order of the inner development loop -- get a basic container running first, then add isolation boundaries, then config-driven builds, then MCP.
+- Solo developer means serial execution. The MVP feature set is large but each piece is well-understood (Go CLI tooling, Docker, container orchestration). The risk is calendar time, not complexity. Mitigation: build in the order of the inner development loop -- get a basic container running first, then add isolation boundaries, then config-driven builds, then MCP.
 
 ## Functional Requirements
 
@@ -427,21 +443,21 @@ All of the following are non-negotiable for MVP -- removing any one breaks the c
 - FR6: Developer can set non-secret environment variables for the agent runtime
 - FR7: Developer can select which AI agent runtime to use (claude-code, gemini-cli)
 - FR8: Developer can override the default config file path with a `-f` flag
-- FR9: Developer can generate a starter configuration file with sensible defaults via `sandbox init`
+- FR9: Developer can generate a starter configuration file with sensible defaults via `asbox init`
 - FR9a: Developer can enable automatic dependency isolation (`auto_isolate_deps: true`) to create named Docker volume mounts over platform-specific dependency directories (e.g., `node_modules/`) within mounted project paths
-- FR9b: When `auto_isolate_deps` is enabled, the system scans mounted project paths at launch for `package.json` files and creates named Docker volumes (pattern: `sandbox-<project>-<path>-node_modules`) for each corresponding `node_modules/` directory. Named volumes persist across sandbox restarts.
+- FR9b: When `auto_isolate_deps` is enabled, the system scans mounted project paths at launch for `package.json` files and creates named Docker volumes (pattern: `asbox-<project>-<path>-node_modules`) for each corresponding `node_modules/` directory. Named volumes persist across sandbox restarts.
 - FR9c: The system logs all auto-detected dependency isolation mounts at launch so the developer has visibility into what was isolated
 - FR9d: Developer can configure a host agent configuration directory mount (`host_agent_config`) with source and target paths for OAuth token synchronization between host and sandbox
 - FR9e: Developer can optionally set `project_name` in configuration to override the default project identifier used for image and volume naming
 
 ### Sandbox Lifecycle
 
-- FR10: Developer can build a sandbox container image from configuration via `sandbox build`
-- FR11: Developer can launch a sandbox session in TTY mode via `sandbox run`
-- FR12: System automatically builds the image if not present when `sandbox run` is invoked
+- FR10: Developer can build a sandbox container image from configuration via `asbox build`
+- FR11: Developer can launch a sandbox session in TTY mode via `asbox run`
+- FR12: System automatically builds the image if not present when `asbox run` is invoked
 - FR13: System detects when configuration or template files have changed and triggers a rebuild
 - FR14: Developer can stop a running sandbox session with Ctrl+C
-- FR15: System validates that required dependencies (Docker, yq) are present before proceeding
+- FR15: System validates that Docker is present before proceeding
 - FR16: System validates that all declared secrets are set in the host environment before launching
 - FR16a: When `auto_isolate_deps` is enabled, the system creates named Docker volume mounts for each detected dependency directory during sandbox launch and ensures correct ownership for the unprivileged sandbox user
 
@@ -478,18 +494,23 @@ All of the following are non-negotiable for MVP -- removing any one breaks the c
 
 ### Image Build System
 
-- FR38: System generates a Dockerfile from a Dockerfile.template using configuration values
+- FR38: System generates a Dockerfile from an embedded Go template using configuration values
 - FR39: System pins base images to digest for reproducible builds
 - FR40: System passes SDK versions as build arguments to the Dockerfile
 - FR41: System installs configured MCP servers at image build time
 - FR42: System enforces git push blocking and isolation boundaries from within the sandbox image
-- FR43: System tags images using content hash of config + template + sandbox files for cache management
+- FR43: System tags images using content hash (pattern: `asbox-<project>:<hash>`) for cache management
 - FR44: System installs agent environment instruction files (`CLAUDE.md`, `GEMINI.md`) into the sandbox user's home directory at image build time, providing the agent with sandbox-specific constraints (no sudo, container runtime details, Playwright usage, e2e test workflow) so it can operate without trial-and-error troubleshooting
 - FR45: When `host_agent_config` is configured, system mounts the host agent configuration directory read-write into the sandbox and sets the appropriate config directory environment variable (e.g., `CLAUDE_CONFIG_DIR`) for the agent runtime
 - FR46: System merges build-time MCP server manifest with project-level `.mcp.json` at runtime; project configuration takes precedence on name conflicts
-- FR47: System exits with specific exit codes to distinguish error categories: 0 (success), 1 (configuration error), 2 (usage error), 3 (missing dependency), 4 (secret validation failure)
+- FR47: System exits with specific exit codes to distinguish error categories: 0 (success), 1 (configuration error), 2 (usage error), 3 (missing dependency), 4 (secret validation failure). Implemented via Go structured error types.
 - FR48: System uses Tini as init process (PID 1) for proper signal forwarding and zombie process reaping
 - FR49: System aligns sandbox user UID/GID with host user at container startup to ensure correct file permissions on mounted directories
+- FR50: All supporting files (Dockerfile template, entrypoint.sh, git-wrapper.sh, healthcheck-poller.sh, agent-instructions.md, starter config template) are embedded in the Go binary via the `embed` package and require no external file dependencies
+- FR51: Developer can configure `bmad_repos` as a list of local paths to checked-out repositories in `.asbox/config.yaml`
+- FR52: When `bmad_repos` is configured, the system automatically creates mount mappings for each repository into `/workspace/repos/<repo_name>` inside the sandbox container
+- FR53: When `bmad_repos` is configured, the system generates an agent configuration file (e.g., `CLAUDE.md`) instructing the agent that git operations and code changes should be executed within the relevant repositories under the `repos/` directory, and mounts it into the container
+- FR54: The system is distributed as a single statically-linked Go binary with no external runtime dependencies beyond Docker
 
 ## Non-Functional Requirements
 
@@ -507,13 +528,14 @@ The security model protects against accidental leakage from AI agents that hallu
 ### Integration
 
 - NFR7: The CLI works with Docker Engine 20.10+ on the host. Inside the sandbox, rootless Podman 5.x is the container runtime with docker CLI alias for agent compatibility
-- NFR8: YAML configuration is parsed via `yq` v4+ -- the script fails clearly if `yq` is not installed or is an incompatible version
+- NFR8: YAML configuration is parsed via Go's `gopkg.in/yaml.v3` -- no external parsing dependency required
 - NFR9: MCP servers installed in the sandbox follow the standard MCP protocol and are startable by any MCP-compatible agent
 - NFR10: The git wrapper is transparent to the agent for all operations except push -- git log, diff, commit, branch, etc. behave identically to standard git
 
 ### Portability & Reliability
 
-- NFR11: The CLI runs on macOS (arm64/amd64) and Linux (amd64) with bash 4+
+- NFR11: The CLI runs on macOS (arm64/amd64) and Linux (amd64) as a statically-linked Go binary. Bash 4+ is no longer required on the host.
 - NFR12: Image builds are reproducible -- the same config + template + sandbox files produce an identical image regardless of when or where the build runs (base image pinned to digest)
 - NFR13: The CLI fails fast with error messages that name the missing dependency, unset secret, or invalid field and state the required fix action. Each error category returns a distinct exit code (1-4) for programmatic detection
 - NFR14: A crashed or Ctrl+C'd sandbox leaves no orphaned containers or dangling networks on the host. Tini as PID 1 ensures proper signal forwarding and cleanup of child processes
+- NFR15: Integration test suite covers all supported use cases (sandbox lifecycle, mounts, secrets, isolation boundaries, inner containers, MCP, auto_isolate_deps, bmad_repos) with parallel test execution via Go's testing framework
