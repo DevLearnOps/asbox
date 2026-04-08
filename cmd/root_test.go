@@ -115,7 +115,8 @@ func TestDockerNotFound_returnsDependencyError(t *testing.T) {
 }
 
 func TestStubCommands_returnNotImplemented(t *testing.T) {
-	for _, name := range []string{"init", "build", "run"} {
+	// Only init is still a stub; build and run now call config.Parse()
+	for _, name := range []string{"init"} {
 		t.Run(name, func(t *testing.T) {
 			r := newRootCmd()
 			err := r.run(name)
@@ -128,6 +129,28 @@ func TestStubCommands_returnNotImplemented(t *testing.T) {
 			var ce *config.ConfigError
 			if !errors.As(err, &ce) {
 				t.Errorf("expected *config.ConfigError, got %T", err)
+			}
+			if got := exitCode(err); got != 1 {
+				t.Errorf("exitCode = %d, want 1", got)
+			}
+		})
+	}
+}
+
+func TestBuildRun_missingConfig_returnsConfigError(t *testing.T) {
+	for _, name := range []string{"build", "run"} {
+		t.Run(name, func(t *testing.T) {
+			r := newRootCmd()
+			err := r.run(name)
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			var ce *config.ConfigError
+			if !errors.As(err, &ce) {
+				t.Fatalf("expected *ConfigError, got %T: %v", err, err)
+			}
+			if !strings.Contains(err.Error(), "config file not found") {
+				t.Errorf("expected 'config file not found', got %q", err.Error())
 			}
 			if got := exitCode(err); got != 1 {
 				t.Errorf("exitCode = %d, want 1", got)
