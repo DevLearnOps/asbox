@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: "2026-04-08"
-last_updated: "2026-04-09"  # story 1-5 done
+last_updated: "2026-04-09"  # story 1-6 done
 project: ai-sandbox
 project_key: NOKEY
 tracking_system: file-system
@@ -49,7 +49,7 @@ development_status:
   1-3-base-dockerfile-template: done
   1-4-sdk-installation-blocks-in-dockerfile-template: done
   1-5-container-scripts-and-tooling-in-dockerfile-template: done
-  1-6-image-build-with-content-hash-caching: backlog
+  1-6-image-build-with-content-hash-caching: done
   1-7-sandbox-run-with-tty-and-lifecycle: backlog
   1-8-configuration-initialization: backlog
   epic-1-retrospective: optional

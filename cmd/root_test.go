@@ -43,6 +43,7 @@ func TestExitCode_mapping(t *testing.T) {
 	}{
 		{"ConfigError", &config.ConfigError{Msg: "bad"}, 1},
 		{"TemplateError", &template.TemplateError{Msg: "bad"}, 1},
+		{"BuildError", &docker.BuildError{Msg: "build failed"}, 1},
 		{"DependencyError", &docker.DependencyError{Msg: "missing"}, 3},
 		{"SecretError", &config.SecretError{Msg: "leak"}, 4},
 		{"UsageError", &usageError{err: fmt.Errorf("unknown flag")}, 2},
