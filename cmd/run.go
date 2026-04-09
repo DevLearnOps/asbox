@@ -7,6 +7,7 @@ import (
 
 	"github.com/mcastellin/asbox/internal/config"
 	"github.com/mcastellin/asbox/internal/docker"
+	"github.com/mcastellin/asbox/internal/mount"
 	"github.com/spf13/cobra"
 )
 
@@ -19,13 +20,19 @@ var runCmd = &cobra.Command{
 			return err
 		}
 
-		// Build if needed (same hash logic as cmd/build.go)
-		imageRef, _, err := ensureBuild(cfg, cmd)
+		// Validate mounts and secrets before building (fail fast on config errors)
+		mountFlags, err := mount.AssembleMounts(cfg)
 		if err != nil {
 			return err
 		}
 
 		envVars, err := buildEnvVars(cfg)
+		if err != nil {
+			return err
+		}
+
+		// Build if needed (same hash logic as cmd/build.go)
+		imageRef, _, err := ensureBuild(cfg, cmd)
 		if err != nil {
 			return err
 		}
@@ -38,6 +45,7 @@ var runCmd = &cobra.Command{
 			ImageRef:      imageRef,
 			ContainerName: containerName,
 			EnvVars:       envVars,
+			Mounts:        mountFlags,
 			Stdin:         os.Stdin,
 			Stdout:        cmd.OutOrStdout(),
 			Stderr:        cmd.ErrOrStderr(),

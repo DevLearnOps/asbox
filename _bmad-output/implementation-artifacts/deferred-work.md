@@ -37,3 +37,9 @@
 ## Deferred from: code review of story 1-8 (2026-04-09)
 
 - `PersistentPreRunE` override scope too broad — `initCmd` uses `PersistentPreRunE` instead of `PreRunE` to bypass Docker check, meaning any future subcommand of `init` would also skip the check silently. [cmd/init.go:13-15]
+
+## Deferred from: code review of story 2-1 (2026-04-09)
+
+- `HostAgentConfig` mount not included in `AssembleMounts` — future Story 7-1 scope. The field is parsed and path-resolved but never passed to Docker. [internal/mount/mount.go]
+- Colon in source/target paths breaks Docker `-v` format — `source:target` concatenation breaks if either path contains a colon. Pre-existing Docker `-v` limitation; rare on Linux. [internal/mount/mount.go:23]
+- Duplicate mount targets silently conflict — two mounts targeting the same container path produce two `-v` flags; Docker uses last-one-wins. No cross-mount validation in config.Parse() or AssembleMounts(). [internal/mount/mount.go]
