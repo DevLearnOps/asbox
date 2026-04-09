@@ -4,7 +4,7 @@ FROM ubuntu:24.04@sha256:e21f810fa78c09944446ec02048605eb3ab1e4e2e261c387ecc7456
 {{/* Base packages and Tini */}}
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y \
-    tini curl wget dnsutils git jq unzip zip less vim \
+    tini curl wget dnsutils git jq unzip zip less vim gosu \
     ca-certificates gnupg lsb-release sudo build-essential \
     && rm -rf /var/lib/apt/lists/*
 
@@ -31,7 +31,7 @@ RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - && \
 
 {{/* Go SDK */}}
 ARG GO_VERSION={{.SDKs.Go}}
-RUN curl -fsSL https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz | tar -C /usr/local -xz
+RUN curl -fsSL https://go.dev/dl/go${GO_VERSION}.linux-$(dpkg --print-architecture).tar.gz | tar -C /usr/local -xz
 ENV PATH="/usr/local/go/bin:${PATH}"
 {{- end}}
 {{- if .SDKs.Python}}
@@ -57,13 +57,61 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 {{- end}}
 
-{{- /* Container scripts and tooling will be added by Story 1.5 */ -}}
+{{- /* Podman 5.x with Docker compatibility */ -}}
+RUN apt-get update && \
+    apt-get install -y uidmap slirp4netns && \
+    curl -fsSL "https://download.opensuse.org/repositories/devel:kubic:libcontainers:unstable/xUbuntu_$(lsb_release -rs)/Release.key" | gpg --dearmor -o /etc/apt/keyrings/kubic.gpg && \
+    echo "deb [signed-by=/etc/apt/keyrings/kubic.gpg] https://download.opensuse.org/repositories/devel:kubic:libcontainers:unstable/xUbuntu_$(lsb_release -rs)/ /" > /etc/apt/sources.list.d/kubic.list && \
+    apt-get update && \
+    apt-get install -y podman podman-docker aardvark-dns netavark && \
+    rm -rf /var/lib/apt/lists/*
 
-{{/* Non-secret environment variables */}}
+{{- /* Podman configuration */ -}}
+RUN mkdir -p /etc/containers && \
+    printf '[storage]\ndriver = "vfs"\n' > /etc/containers/storage.conf && \
+    printf '[engine]\nevents_logger = "file"\n\n[network]\nnetwork_backend = "netavark"\n' > /etc/containers/containers.conf
+
+{{- /* Docker Compose v2 standalone binary */ -}}
+RUN COMPOSE_VERSION=$(curl -fsSL https://api.github.com/repos/docker/compose/releases/latest | jq -r .tag_name) && \
+    curl -fsSL "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-linux-$(uname -m)" -o /usr/local/bin/docker-compose && \
+    chmod +x /usr/local/bin/docker-compose && \
+    mkdir -p /usr/local/lib/docker/cli-plugins && \
+    ln -s /usr/local/bin/docker-compose /usr/local/lib/docker/cli-plugins/docker-compose
+{{- if eq .Agent "claude-code"}}
+
+{{- /* Claude Code CLI */ -}}
+RUN curl -fsSL https://storage.googleapis.com/anthropic-sdk/claude-code/install.sh | bash
+{{- end}}
+{{- if eq .Agent "gemini-cli"}}
+
+{{- /* Gemini CLI */ -}}
+RUN npm install -g @google/gemini-cli
+{{- end}}
+{{- if .Agent}}
+
+{{- /* Agent instruction file */ -}}
+COPY agent-instructions.md.tmpl /tmp/agent-instructions.md
+{{- if eq .Agent "claude-code"}}
+RUN mv /tmp/agent-instructions.md /home/sandbox/CLAUDE.md && chown sandbox:sandbox /home/sandbox/CLAUDE.md
+{{- end}}
+{{- if eq .Agent "gemini-cli"}}
+RUN mv /tmp/agent-instructions.md /home/sandbox/GEMINI.md && chown sandbox:sandbox /home/sandbox/GEMINI.md
+{{- end}}
+{{- end}}
+{{- if .SDKs.NodeJS}}
+
+{{- /* Playwright webkit system dependencies */ -}}
+RUN npx playwright install-deps webkit
+{{- end}}
+
+{{- /* Testcontainers compatibility */ -}}
+ENV TESTCONTAINERS_RYUK_DISABLED=true
+ENV TESTCONTAINERS_HOST_OVERRIDE=localhost
+
+{{- /* Non-secret environment variables */ -}}
 {{- range $k, $v := .Env}}
 ENV {{$k}}="{{$v}}"
 {{- end}}
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]
-USER sandbox
 WORKDIR /workspace

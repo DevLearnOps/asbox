@@ -90,13 +90,16 @@ func TestRender_noEnvVars(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if strings.Contains(output, "ENV ") {
-		// Filter out DEBIAN_FRONTEND which is an ARG, not ENV
-		// Check there are no user ENV directives
-		for _, line := range strings.Split(output, "\n") {
-			if strings.HasPrefix(strings.TrimSpace(line), "ENV ") {
-				t.Errorf("expected no ENV directives for user vars, found: %s", line)
-			}
+	// Check there are no user-defined ENV directives (Testcontainers and PATH ENVs are expected)
+	knownEnvs := map[string]bool{
+		`ENV TESTCONTAINERS_RYUK_DISABLED=true`:    true,
+		`ENV TESTCONTAINERS_HOST_OVERRIDE=localhost`: true,
+		`ENV PATH="/usr/local/go/bin:${PATH}"`:      true,
+	}
+	for _, line := range strings.Split(output, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "ENV ") && !knownEnvs[trimmed] {
+			t.Errorf("expected no user ENV directives, found: %s", line)
 		}
 	}
 }
@@ -135,8 +138,8 @@ func TestRender_minimalConfig(t *testing.T) {
 	if !strings.Contains(output, "ENTRYPOINT") {
 		t.Error("expected valid Dockerfile with ENTRYPOINT directive")
 	}
-	if !strings.Contains(output, "USER sandbox") {
-		t.Error("expected valid Dockerfile with USER sandbox")
+	if strings.Contains(output, "USER sandbox") {
+		t.Error("USER sandbox should not be in Dockerfile — entrypoint uses gosu to drop privileges")
 	}
 	if !strings.Contains(output, "WORKDIR /workspace") {
 		t.Error("expected valid Dockerfile with WORKDIR /workspace")
@@ -218,8 +221,8 @@ func TestRender_goOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(output, "go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz") {
-		t.Error("expected Go tarball download in output")
+	if !strings.Contains(output, "go.dev/dl/go${GO_VERSION}.linux-$(dpkg --print-architecture).tar.gz") {
+		t.Error("expected Go tarball download in output with arch detection")
 	}
 	if !strings.Contains(output, `ENV PATH="/usr/local/go/bin:${PATH}"`) {
 		t.Error("expected Go PATH setup in output")
@@ -315,10 +318,12 @@ func TestRender_noPackages(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// Count how many apt-get install lines there are — should only be the base packages one
-	count := strings.Count(output, "apt-get install")
-	if count != 1 {
-		t.Errorf("expected exactly 1 apt-get install (base packages only), found %d", count)
+	// With Podman tooling, there are multiple apt-get install lines (base + uidmap/slirp4netns + podman)
+	// Verify there is no additional packages block (the one with range over .Packages)
+	// The additional packages block would contain user-specified packages like libpq-dev
+	// Just verify no additional packages block content appears
+	if strings.Contains(output, "libpq-dev") || strings.Contains(output, "redis-tools") {
+		t.Error("expected no additional packages block when no packages configured")
 	}
 }
 
@@ -351,6 +356,183 @@ func TestRender_noBlankLinesWithoutSDKs(t *testing.T) {
 	region := output[chmodLineEnd:entrypointIdx]
 	if strings.Contains(region, "\n\n\n") {
 		t.Errorf("found excessive blank lines in SDK region when no SDKs configured:\n%s", region)
+	}
+}
+
+func TestRender_podmanInstalled(t *testing.T) {
+	cfg := &config.Config{Agent: "claude-code"}
+	output, err := Render(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(output, "devel:kubic:libcontainers:unstable") {
+		t.Error("expected Kubic repository setup in output")
+	}
+	if !strings.Contains(output, "podman podman-docker") {
+		t.Error("expected podman and podman-docker install in output")
+	}
+}
+
+func TestRender_podmanConfig(t *testing.T) {
+	cfg := &config.Config{Agent: "claude-code"}
+	output, err := Render(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(output, "storage.conf") {
+		t.Error("expected storage.conf configuration in output")
+	}
+	if !strings.Contains(output, `driver = "vfs"`) {
+		t.Error("expected vfs storage driver in output")
+	}
+	if !strings.Contains(output, "containers.conf") {
+		t.Error("expected containers.conf configuration in output")
+	}
+	if !strings.Contains(output, `network_backend = "netavark"`) {
+		t.Error("expected netavark network backend in output")
+	}
+	if !strings.Contains(output, `events_logger = "file"`) {
+		t.Error("expected file events logger in output")
+	}
+}
+
+func TestRender_dockerCompose(t *testing.T) {
+	cfg := &config.Config{Agent: "claude-code"}
+	output, err := Render(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(output, "docker/compose/releases") {
+		t.Error("expected Docker Compose download from GitHub releases")
+	}
+	if !strings.Contains(output, "docker-compose-linux-$(uname -m)") {
+		t.Error("expected multi-arch Docker Compose download using $(uname -m)")
+	}
+	if !strings.Contains(output, "/usr/local/bin/docker-compose") {
+		t.Error("expected Docker Compose installed to /usr/local/bin/docker-compose")
+	}
+	if !strings.Contains(output, "/usr/local/lib/docker/cli-plugins/docker-compose") {
+		t.Error("expected Docker Compose symlink at cli-plugins path")
+	}
+}
+
+func TestRender_claudeCodeAgent(t *testing.T) {
+	cfg := &config.Config{Agent: "claude-code"}
+	output, err := Render(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(output, "anthropic-sdk/claude-code/install.sh") {
+		t.Error("expected Claude Code install script in output")
+	}
+	if strings.Contains(output, "npm install -g @google/gemini-cli") {
+		t.Error("expected no Gemini CLI install when agent is claude-code")
+	}
+}
+
+func TestRender_geminiAgent(t *testing.T) {
+	cfg := &config.Config{Agent: "gemini-cli"}
+	output, err := Render(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(output, "npm install -g @google/gemini-cli") {
+		t.Error("expected Gemini CLI npm install in output")
+	}
+	if strings.Contains(output, "anthropic-sdk/claude-code/install.sh") {
+		t.Error("expected no Claude Code install when agent is gemini-cli")
+	}
+}
+
+func TestRender_agentInstructions(t *testing.T) {
+	cfg := &config.Config{Agent: "claude-code"}
+	output, err := Render(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(output, "COPY agent-instructions.md.tmpl /tmp/agent-instructions.md") {
+		t.Error("expected agent instructions COPY directive in output")
+	}
+	if !strings.Contains(output, "/home/sandbox/CLAUDE.md") {
+		t.Error("expected CLAUDE.md in sandbox home directory")
+	}
+
+	// Test gemini agent gets GEMINI.md
+	cfg2 := &config.Config{Agent: "gemini-cli"}
+	output2, err := Render(cfg2)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(output2, "/home/sandbox/GEMINI.md") {
+		t.Error("expected GEMINI.md in sandbox home directory for gemini agent")
+	}
+}
+
+func TestRender_testcontainersEnv(t *testing.T) {
+	cfg := &config.Config{Agent: "claude-code"}
+	output, err := Render(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(output, "ENV TESTCONTAINERS_RYUK_DISABLED=true") {
+		t.Error("expected TESTCONTAINERS_RYUK_DISABLED=true in output")
+	}
+	if !strings.Contains(output, "ENV TESTCONTAINERS_HOST_OVERRIDE=localhost") {
+		t.Error("expected TESTCONTAINERS_HOST_OVERRIDE=localhost in output")
+	}
+}
+
+func TestRender_playwrightDepsWithNodeJS(t *testing.T) {
+	cfg := &config.Config{
+		Agent: "claude-code",
+		SDKs:  config.SDKConfig{NodeJS: "22"},
+	}
+	output, err := Render(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(output, "npx playwright install-deps webkit") {
+		t.Error("expected Playwright webkit deps install when Node.js is configured")
+	}
+}
+
+func TestRender_noPlaywrightDepsWithoutNodeJS(t *testing.T) {
+	cfg := &config.Config{Agent: "claude-code"}
+	output, err := Render(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(output, "playwright install-deps") {
+		t.Error("expected no Playwright deps install when Node.js is not configured")
+	}
+}
+
+func TestRender_noBlankLinesWithoutTooling(t *testing.T) {
+	cfg := &config.Config{Agent: "claude-code"}
+	output, err := Render(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Verify no excessive blank lines in the output
+	if strings.Contains(output, "\n\n\n\n") {
+		t.Error("found excessive blank lines (4+) in rendered output")
+	}
+}
+
+func TestRender_goSDKMultiArch(t *testing.T) {
+	cfg := &config.Config{
+		Agent: "claude-code",
+		SDKs:  config.SDKConfig{Go: "1.23"},
+	}
+	output, err := Render(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(output, "go.dev/dl/go${GO_VERSION}.linux-$(dpkg --print-architecture).tar.gz") {
+		t.Error("expected Go SDK download to use $(dpkg --print-architecture) for multi-arch support")
+	}
+	if strings.Contains(output, "linux-amd64") {
+		t.Error("expected no hardcoded linux-amd64 in Go SDK download URL")
 	}
 }
 

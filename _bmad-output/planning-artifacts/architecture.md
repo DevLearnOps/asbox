@@ -189,6 +189,7 @@ asbox/
   {{end}}
   ```
 - **Affects:** `internal/config/` (validation of required fields), `internal/template/` (rendering only — assumes valid input), `embed/Dockerfile.tmpl` (template source)
+- **Multi-architecture support:** All binary download steps in the Dockerfile template MUST detect host architecture at build time. Use `$(dpkg --print-architecture)` (returns `amd64`/`arm64`) for URLs using Debian-style arch names (e.g., Go SDK tarball). Use `$(uname -m)` (returns `x86_64`/`aarch64`) for URLs using kernel-style arch names (e.g., Docker Compose). Package manager installs (apt, npm) are architecture-transparent. Never hardcode architecture strings like `amd64` or `x86_64` in download URLs.
 
 ### Isolation Mechanisms
 

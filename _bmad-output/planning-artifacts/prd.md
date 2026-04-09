@@ -308,7 +308,7 @@ When `auto_isolate_deps` is enabled, asbox scans all mounted project paths at la
 **Image build strategy:**
 - Base image (Ubuntu 24.04 LTS) pinned to digest for reproducibility
 - Tini installed as init process for proper signal forwarding and zombie process reaping
-- SDK installation via version managers or official binaries based on build arguments
+- SDK installation via version managers or official binaries based on build arguments. Binary downloads MUST detect host architecture at build time (`$(dpkg --print-architecture)` or `$(uname -m)`) to support both amd64 and arm64 — no hardcoded architecture strings.
 - Rootless Podman 5.x installed from upstream Kubic/OBS repository with docker CLI alias (`podman-docker`) for agent compatibility
 - Docker Compose v2 installed as standalone binary
 - MCP servers installed at build time; MCP manifest embedded at `/etc/sandbox/mcp-servers.json`

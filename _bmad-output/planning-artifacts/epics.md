@@ -383,6 +383,7 @@ So that my sandbox image includes only the SDKs I specified in my config.
 - Extends `embed/Dockerfile.tmpl` from Story 1.3
 - Conditional blocks: `{{if .SDKs.NodeJS}}...{{end}}`, `{{if .SDKs.Go}}...{{end}}`, `{{if .SDKs.Python}}...{{end}}`
 - `internal/docker/build.go` — `--build-arg` flag assembly from config SDKs
+- Multi-arch: Binary downloads (e.g., Go SDK tarball) must use `$(dpkg --print-architecture)` to resolve correct arch at build time — never hardcode `amd64`/`arm64`
 
 ### Story 1.5: Container Scripts and Tooling in Dockerfile Template
 
@@ -429,6 +430,7 @@ So that the sandbox has everything needed for agent operation.
 - Podman setup: add Kubic repo key + source, install podman + podman-docker, configure storage.conf (vfs), containers.conf (netavark, aardvark-dns, file logger)
 - Testcontainers compatibility: set `TESTCONTAINERS_RYUK_DISABLED=true`, `TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE`, `TESTCONTAINERS_HOST_OVERRIDE=localhost`
 - Webkit note: Use `npx playwright install-deps webkit` to install system deps. Validate via `ldd` against the webkit binary post-build. If `install-deps` is insufficient, add explicit `apt-get install` for missing packages.
+- Multi-arch: All binary downloads (Docker Compose, etc.) must detect host architecture at build time — use `$(dpkg --print-architecture)` or `$(uname -m)` as appropriate. Also fix pre-existing Go SDK `linux-amd64` hardcode from Story 1.4.
 
 ### Story 1.6: Image Build with Content-Hash Caching
 
