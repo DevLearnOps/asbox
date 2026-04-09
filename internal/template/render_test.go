@@ -14,8 +14,8 @@ func TestRender_baseImage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.HasPrefix(output, "FROM ubuntu:24.04@sha256:") {
-		t.Errorf("expected output to start with pinned Ubuntu base image, got: %s", firstLine(output))
+	if !strings.HasPrefix(output, "FROM ubuntu:24.04") {
+		t.Errorf("expected output to start with Ubuntu 24.04 base image, got: %s", firstLine(output))
 	}
 }
 
@@ -92,9 +92,12 @@ func TestRender_noEnvVars(t *testing.T) {
 	}
 	// Check there are no user-defined ENV directives (Testcontainers and PATH ENVs are expected)
 	knownEnvs := map[string]bool{
-		`ENV TESTCONTAINERS_RYUK_DISABLED=true`:    true,
-		`ENV TESTCONTAINERS_HOST_OVERRIDE=localhost`: true,
-		`ENV PATH="/usr/local/go/bin:${PATH}"`:      true,
+		`ENV TESTCONTAINERS_RYUK_DISABLED=true`:                      true,
+		`ENV TESTCONTAINERS_HOST_OVERRIDE=localhost`:                  true,
+		`ENV PATH="/usr/local/go/bin:${PATH}"`:                       true,
+		`ENV NPM_CONFIG_PREFIX=/home/sandbox/.npm-global`:            true,
+		`ENV PATH="/home/sandbox/.npm-global/bin:${PATH}"`:           true,
+		`ENV PATH="/home/sandbox/.local/bin:${PATH}"`:                true,
 	}
 	for _, line := range strings.Split(output, "\n") {
 		trimmed := strings.TrimSpace(line)
@@ -132,14 +135,15 @@ func TestRender_minimalConfig(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// Should produce valid Dockerfile with no SDK blocks
-	if !strings.Contains(output, "FROM ubuntu:24.04@sha256:") {
+	if !strings.Contains(output, "FROM ubuntu:24.04") {
 		t.Error("expected valid Dockerfile with FROM directive")
 	}
 	if !strings.Contains(output, "ENTRYPOINT") {
 		t.Error("expected valid Dockerfile with ENTRYPOINT directive")
 	}
-	if strings.Contains(output, "USER sandbox") {
-		t.Error("USER sandbox should not be in Dockerfile — entrypoint uses gosu to drop privileges")
+	// USER sandbox is expected when agent is claude-code (install script runs as sandbox user)
+	if !strings.Contains(output, "USER sandbox") {
+		t.Error("expected USER sandbox for claude-code agent install")
 	}
 	if !strings.Contains(output, "WORKDIR /workspace") {
 		t.Error("expected valid Dockerfile with WORKDIR /workspace")
@@ -422,7 +426,7 @@ func TestRender_claudeCodeAgent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(output, "anthropic-sdk/claude-code/install.sh") {
+	if !strings.Contains(output, "claude.ai/install.sh") {
 		t.Error("expected Claude Code install script in output")
 	}
 	if strings.Contains(output, "npm install -g @google/gemini-cli") {

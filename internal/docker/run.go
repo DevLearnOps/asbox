@@ -20,7 +20,7 @@ type RunOptions struct {
 
 // runCmdArgs assembles the docker run command arguments.
 func runCmdArgs(opts RunOptions) []string {
-	args := []string{"run", "-it", "--rm", "--init"}
+	args := []string{"run", "-it", "--rm"}
 
 	if opts.ContainerName != "" {
 		args = append(args, "--name", opts.ContainerName)

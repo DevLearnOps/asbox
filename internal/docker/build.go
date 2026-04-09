@@ -1,11 +1,13 @@
 package docker
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/mcastellin/asbox/internal/config"
 )
@@ -22,14 +24,23 @@ type BuildOptions struct {
 
 // ImageExists checks whether a Docker image with the given reference exists locally.
 func ImageExists(imageRef string) (bool, error) {
+	var stderr bytes.Buffer
 	cmd := exec.Command("docker", "image", "inspect", imageRef)
 	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
+	cmd.Stderr = &stderr
 	err := cmd.Run()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
-			// Exit code 1 from docker inspect means image not found
-			if exitErr.ExitCode() == 1 {
+			code := exitErr.ExitCode()
+			errMsg := stderr.String()
+			// Exit code 1 from docker/podman inspect means image not found.
+			// Podman may also return 125 for "image not found" — only treat it
+			// as not-found if stderr mentions the image reference (rules out
+			// unrelated runtime errors like socket unavailable).
+			if code == 1 {
+				return false, nil
+			}
+			if code == 125 && strings.Contains(errMsg, imageRef) {
 				return false, nil
 			}
 		}

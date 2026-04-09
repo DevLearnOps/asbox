@@ -31,6 +31,12 @@ var runCmd = &cobra.Command{
 			return err
 		}
 
+		agentCmd, err := agentCommand(cfg.Agent)
+		if err != nil {
+			return err
+		}
+		envVars["AGENT_CMD"] = agentCmd
+
 		// Build if needed (same hash logic as cmd/build.go)
 		imageRef, _, err := ensureBuild(cfg, cmd)
 		if err != nil {
@@ -82,6 +88,19 @@ func buildEnvVars(cfg *config.Config) (map[string]string, error) {
 	envVars["HOST_GID"] = strconv.Itoa(os.Getgid())
 
 	return envVars, nil
+}
+
+// agentCommand maps the configured agent name to the shell command the
+// entrypoint should exec into.
+func agentCommand(agent string) (string, error) {
+	switch agent {
+	case "claude-code":
+		return "claude --dangerously-skip-permissions", nil
+	case "gemini-cli":
+		return "gemini", nil
+	default:
+		return "", fmt.Errorf("unknown agent %q: supported agents are claude-code, gemini-cli", agent)
+	}
 }
 
 func init() {

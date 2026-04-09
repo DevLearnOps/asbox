@@ -13,12 +13,12 @@ func TestRunCmdArgs_basicFlags(t *testing.T) {
 	}
 	args := runCmdArgs(opts)
 
-	// Must start with "run -it --rm --init"
-	if len(args) < 4 {
-		t.Fatalf("expected at least 4 args, got %d: %v", len(args), args)
+	// Must start with "run -it --rm"
+	if len(args) < 3 {
+		t.Fatalf("expected at least 3 args, got %d: %v", len(args), args)
 	}
-	if args[0] != "run" || args[1] != "-it" || args[2] != "--rm" || args[3] != "--init" {
-		t.Errorf("expected [run -it --rm --init], got %v", args[:4])
+	if args[0] != "run" || args[1] != "-it" || args[2] != "--rm" {
+		t.Errorf("expected [run -it --rm], got %v", args[:3])
 	}
 
 	// Must end with image ref
@@ -141,7 +141,7 @@ func TestRunCmdArgs_fullOptions(t *testing.T) {
 
 	// Verify all required elements are present
 	checks := []string{
-		"run", "-it", "--rm", "--init",
+		"run", "-it", "--rm",
 		"--name asbox-myproject",
 		"-v /src:/workspace",
 		"asbox-myproject:a1b2c3",

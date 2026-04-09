@@ -43,3 +43,10 @@
 - `HostAgentConfig` mount not included in `AssembleMounts` — future Story 7-1 scope. The field is parsed and path-resolved but never passed to Docker. [internal/mount/mount.go]
 - Colon in source/target paths breaks Docker `-v` format — `source:target` concatenation breaks if either path contains a colon. Pre-existing Docker `-v` limitation; rare on Linux. [internal/mount/mount.go:23]
 - Duplicate mount targets silently conflict — two mounts targeting the same container path produce two `-v` flags; Docker uses last-one-wins. No cross-mount validation in config.Parse() or AssembleMounts(). [internal/mount/mount.go]
+
+## Deferred from: code review of story 2-2 (2026-04-09)
+
+- Digest-pinned base image replaced with floating tag — `FROM ubuntu:24.04` without digest loses reproducibility. Multi-arch digests could restore both properties. [embed/Dockerfile.tmpl:2]
+- Curl-pipe-bash pattern for multiple installers — NodeSource, get-pip.py, Claude Code install script, Docker Compose download all execute remote code without integrity verification. [embed/Dockerfile.tmpl]
+- `gemini-cli` agent requires npm but NodeJS SDK not enforced — config validation does not reject `agent: gemini-cli` without `sdks.nodejs`. Build fails at `npm install -g`. [embed/Dockerfile.tmpl:83]
+- Docker Compose version fetched from GitHub API with no pinning — non-reproducible builds, subject to API rate limits. [embed/Dockerfile.tmpl:72]

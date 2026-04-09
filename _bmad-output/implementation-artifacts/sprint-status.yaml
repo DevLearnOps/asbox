@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: "2026-04-08"
-last_updated: "2026-04-09"  # story 2-1 done after code review
+last_updated: "2026-04-09"  # story 2-2 done
 project: ai-sandbox
 project_key: NOKEY
 tracking_system: file-system
@@ -57,12 +57,12 @@ development_status:
   # Epic 2: Agent Can Work With Project Files and Git
   epic-2: in-progress
   2-1-host-directory-mounts-and-secret-injection: done
-  2-2-development-toolchain-verification: ready-for-dev
+  2-2-development-toolchain-verification: done
   epic-2-retrospective: optional
 
   # Epic 3: Sandbox Enforces Isolation Boundaries
-  epic-3: backlog
-  3-1-git-push-blocking-and-filesystem-isolation: backlog
+  epic-3: in-progress
+  3-1-git-push-blocking-and-filesystem-isolation: ready-for-dev
   epic-3-retrospective: optional
 
   # Epic 4: Agent Can Build and Run Docker Services

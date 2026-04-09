@@ -1,42 +1,41 @@
-{{- /* Base image - pinned to digest for reproducibility */ -}}
-FROM ubuntu:24.04@sha256:e21f810fa78c09944446ec02048605eb3ab1e4e2e261c387ecc7456b38400d79
+{{- /* Base image - tag-pinned; digest omitted for multi-arch (amd64 + arm64) support */ -}}
+FROM ubuntu:24.04
 
-{{/* Base packages and Tini */}}
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y \
     tini curl wget dnsutils git jq unzip zip less vim gosu \
     ca-certificates gnupg lsb-release sudo build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-{{/* Non-root sandbox user */}}
-RUN groupadd -g 1000 sandbox && \
+RUN if id ubuntu >/dev/null 2>&1; then userdel -r ubuntu; fi && \
+    if getent group ubuntu >/dev/null 2>&1; then groupdel ubuntu; fi && \
+    groupadd -g 1000 sandbox && \
     useradd -m -u 1000 -g sandbox -s /bin/bash sandbox && \
     echo "sandbox ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers.d/sandbox
 
-{{/* Embedded scripts */}}
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY git-wrapper.sh /usr/local/bin/git
 COPY healthcheck-poller.sh /usr/local/bin/healthcheck-poller.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/git /usr/local/bin/healthcheck-poller.sh
-
 {{- if .SDKs.NodeJS}}
 
-{{/* Node.js SDK */}}
 ARG NODE_VERSION={{.SDKs.NodeJS}}
 RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - && \
     apt-get install -y nodejs && \
-    rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/* && \
+    mkdir -p /home/sandbox/.npm-global && \
+    chown sandbox:sandbox /home/sandbox/.npm-global
+ENV NPM_CONFIG_PREFIX=/home/sandbox/.npm-global
+ENV PATH="/home/sandbox/.npm-global/bin:${PATH}"
 {{- end}}
 {{- if .SDKs.Go}}
 
-{{/* Go SDK */}}
 ARG GO_VERSION={{.SDKs.Go}}
 RUN curl -fsSL https://go.dev/dl/go${GO_VERSION}.linux-$(dpkg --print-architecture).tar.gz | tar -C /usr/local -xz
 ENV PATH="/usr/local/go/bin:${PATH}"
 {{- end}}
 {{- if .SDKs.Python}}
 
-{{/* Python SDK */}}
 ARG PYTHON_VERSION={{.SDKs.Python}}
 RUN apt-get update && \
     apt-get install -y software-properties-common && \
@@ -45,11 +44,12 @@ RUN apt-get update && \
     apt-get install -y python${PYTHON_VERSION} python${PYTHON_VERSION}-venv python${PYTHON_VERSION}-dev && \
     update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 1 && \
     update-alternatives --install /usr/bin/python python /usr/bin/python${PYTHON_VERSION} 1 && \
-    rm -rf /var/lib/apt/lists/*
+    curl -fsSL https://bootstrap.pypa.io/get-pip.py | python${PYTHON_VERSION} - --break-system-packages && \
+    rm -rf /var/lib/apt/lists/* && \
+    rm -f /usr/lib/python${PYTHON_VERSION}/EXTERNALLY-MANAGED
 {{- end}}
 {{- if .Packages}}
 
-{{/* Additional packages */}}
 RUN apt-get update && apt-get install -y \
 {{- range $i, $pkg := .Packages}}
     {{$pkg}} \
@@ -57,7 +57,6 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 {{- end}}
 
-{{- /* Podman 5.x with Docker compatibility */ -}}
 RUN apt-get update && \
     apt-get install -y uidmap slirp4netns && \
     curl -fsSL "https://download.opensuse.org/repositories/devel:kubic:libcontainers:unstable/xUbuntu_$(lsb_release -rs)/Release.key" | gpg --dearmor -o /etc/apt/keyrings/kubic.gpg && \
@@ -66,12 +65,10 @@ RUN apt-get update && \
     apt-get install -y podman podman-docker aardvark-dns netavark && \
     rm -rf /var/lib/apt/lists/*
 
-{{- /* Podman configuration */ -}}
 RUN mkdir -p /etc/containers && \
     printf '[storage]\ndriver = "vfs"\n' > /etc/containers/storage.conf && \
     printf '[engine]\nevents_logger = "file"\n\n[network]\nnetwork_backend = "netavark"\n' > /etc/containers/containers.conf
 
-{{- /* Docker Compose v2 standalone binary */ -}}
 RUN COMPOSE_VERSION=$(curl -fsSL https://api.github.com/repos/docker/compose/releases/latest | jq -r .tag_name) && \
     curl -fsSL "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-linux-$(uname -m)" -o /usr/local/bin/docker-compose && \
     chmod +x /usr/local/bin/docker-compose && \
@@ -79,17 +76,18 @@ RUN COMPOSE_VERSION=$(curl -fsSL https://api.github.com/repos/docker/compose/rel
     ln -s /usr/local/bin/docker-compose /usr/local/lib/docker/cli-plugins/docker-compose
 {{- if eq .Agent "claude-code"}}
 
-{{- /* Claude Code CLI */ -}}
-RUN curl -fsSL https://storage.googleapis.com/anthropic-sdk/claude-code/install.sh | bash
+USER sandbox
+RUN curl -fsSL https://claude.ai/install.sh | bash
+ENV PATH="/home/sandbox/.local/bin:${PATH}"
+USER root
 {{- end}}
 {{- if eq .Agent "gemini-cli"}}
 
-{{- /* Gemini CLI */ -}}
-RUN npm install -g @google/gemini-cli
+RUN npm install -g @google/gemini-cli && \
+    chown -R sandbox:sandbox /home/sandbox/.npm-global
 {{- end}}
 {{- if .Agent}}
 
-{{- /* Agent instruction file */ -}}
 COPY agent-instructions.md.tmpl /tmp/agent-instructions.md
 {{- if eq .Agent "claude-code"}}
 RUN mv /tmp/agent-instructions.md /home/sandbox/CLAUDE.md && chown sandbox:sandbox /home/sandbox/CLAUDE.md
@@ -100,15 +98,11 @@ RUN mv /tmp/agent-instructions.md /home/sandbox/GEMINI.md && chown sandbox:sandb
 {{- end}}
 {{- if .SDKs.NodeJS}}
 
-{{- /* Playwright webkit system dependencies */ -}}
 RUN npx playwright install-deps webkit
 {{- end}}
 
-{{- /* Testcontainers compatibility */ -}}
 ENV TESTCONTAINERS_RYUK_DISABLED=true
 ENV TESTCONTAINERS_HOST_OVERRIDE=localhost
-
-{{- /* Non-secret environment variables */ -}}
 {{- range $k, $v := .Env}}
 ENV {{$k}}="{{$v}}"
 {{- end}}
