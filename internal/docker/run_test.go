@@ -13,12 +13,23 @@ func TestRunCmdArgs_basicFlags(t *testing.T) {
 	}
 	args := runCmdArgs(opts)
 
-	// Must start with "run -it --rm"
-	if len(args) < 3 {
-		t.Fatalf("expected at least 3 args, got %d: %v", len(args), args)
+	// Must start with "run -it --rm" followed by cap-add and security opts
+	if len(args) < 9 {
+		t.Fatalf("expected at least 9 args, got %d: %v", len(args), args)
 	}
 	if args[0] != "run" || args[1] != "-it" || args[2] != "--rm" {
 		t.Errorf("expected [run -it --rm], got %v", args[:3])
+	}
+
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "--cap-add SYS_ADMIN") {
+		t.Errorf("expected --cap-add SYS_ADMIN in args: %v", args)
+	}
+	if !strings.Contains(joined, "--security-opt seccomp=unconfined") {
+		t.Errorf("expected --security-opt seccomp=unconfined in args: %v", args)
+	}
+	if !strings.Contains(joined, "--security-opt apparmor=unconfined") {
+		t.Errorf("expected --security-opt apparmor=unconfined in args: %v", args)
 	}
 
 	// Must end with image ref
@@ -27,7 +38,6 @@ func TestRunCmdArgs_basicFlags(t *testing.T) {
 	}
 
 	// Must contain --name
-	joined := strings.Join(args, " ")
 	if !strings.Contains(joined, "--name asbox-myapp") {
 		t.Errorf("expected --name flag, got %v", args)
 	}
@@ -142,6 +152,9 @@ func TestRunCmdArgs_fullOptions(t *testing.T) {
 	// Verify all required elements are present
 	checks := []string{
 		"run", "-it", "--rm",
+		"--cap-add SYS_ADMIN",
+		"--security-opt seccomp=unconfined",
+		"--security-opt apparmor=unconfined",
 		"--name asbox-myproject",
 		"-v /src:/workspace",
 		"asbox-myproject:a1b2c3",

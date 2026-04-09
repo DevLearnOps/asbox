@@ -58,3 +58,9 @@
 - Curl-pipe-bash pattern for multiple installers — NodeSource, get-pip.py, Claude Code install script, Docker Compose download all execute remote code without integrity verification. [embed/Dockerfile.tmpl]
 - `gemini-cli` agent requires npm but NodeJS SDK not enforced — config validation does not reject `agent: gemini-cli` without `sdks.nodejs`. Build fails at `npm install -g`. [embed/Dockerfile.tmpl:83]
 - Docker Compose version fetched from GitHub API with no pinning — non-reproducible builds, subject to API rate limits. [embed/Dockerfile.tmpl:72]
+
+## Deferred from: code review of story 4-1 (2026-04-09)
+
+- `docker/docker` +incompatible in main require block — test-only dependency (`github.com/docker/docker`) is in the production `require` section of `go.mod`. Could be isolated to a test-only module. [go.mod]
+- Background Podman PID not tracked for cleanup — `podman system service` launched with `&` but PID not captured. tini as PID 1 reaps orphans, so low risk. [embed/entrypoint.sh:110]
+- `AGENT_CMD` injection via shell expansion — `exec gosu sandbox bash -c "${AGENT_CMD}"` passes unsanitized input through `bash -c`. Pre-existing pattern. [embed/entrypoint.sh:140]

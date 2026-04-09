@@ -94,20 +94,61 @@ set_testcontainers_socket() {
     export TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE="${socket_path}"
 }
 
+persist_env() {
+    # Write dynamic env vars to a profile script so they are available
+    # in docker exec sessions (which don't inherit entrypoint exports).
+    local profile="/etc/profile.d/sandbox-env.sh"
+    cat > "${profile}" <<ENVEOF
+export DOCKER_HOST="${DOCKER_HOST:-}"
+export TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE="${TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE:-}"
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-}"
+ENVEOF
+    chmod 644 "${profile}"
+}
+
 start_podman_socket() {
-    local socket_path="/run/user/$(id -u sandbox)/podman/podman.sock"
+    export XDG_RUNTIME_DIR="/run/user/$(id -u sandbox)"
+    mkdir -p "${XDG_RUNTIME_DIR}"
+    chown sandbox:sandbox "${XDG_RUNTIME_DIR}"
+
+    local socket_path="${XDG_RUNTIME_DIR}/podman/podman.sock"
     mkdir -p "$(dirname "${socket_path}")"
     chown sandbox:sandbox "$(dirname "${socket_path}")"
+
+    # Initialize rootless Podman storage/config on first run
+    gosu sandbox podman system migrate 2>&1 | grep -v "^$" >&2 || true
+
+    # Start Podman API socket
     gosu sandbox podman system service --time=0 "unix://${socket_path}" &
+
+    # Export DOCKER_HOST so Docker Compose and SDK clients find the Podman socket
+    export DOCKER_HOST="unix://${socket_path}"
+
+    # Create docker.sock symlink for tools that hardcode the socket path
+    ln -sf "${socket_path}" "${XDG_RUNTIME_DIR}/docker.sock" 2>/dev/null || true
+
+    # Wait for socket readiness (up to 5 seconds)
+    local i
+    for i in 1 2 3 4 5; do
+        if [[ -S "${socket_path}" ]]; then
+            break
+        fi
+        sleep 1
+    done
+
+    if [[ ! -S "${socket_path}" ]]; then
+        echo "WARNING: Podman socket not ready after 5 seconds at ${socket_path}" >&2
+    fi
 }
 
 # Main entrypoint sequence
 align_uid_gid
 chown_volumes
 merge_mcp_config
-set_testcontainers_socket
-start_healthcheck_poller
 start_podman_socket
+set_testcontainers_socket
+persist_env
+start_healthcheck_poller
 
 # Exec into agent command as sandbox user
 if [[ $# -gt 0 ]]; then

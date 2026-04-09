@@ -128,7 +128,10 @@ func execAsUser(ctx context.Context, t *testing.T, container testcontainers.Cont
 	for i, c := range cmd {
 		quoted[i] = "'" + strings.ReplaceAll(c, "'", "'\\''") + "'"
 	}
-	wrapped := []string{"su", "-s", "/bin/bash", "-c", strings.Join(quoted, " "), user}
+	// Source the profile to pick up dynamic env vars set by the entrypoint
+	// (docker exec sessions don't inherit entrypoint shell exports).
+	shellCmd := ". /etc/profile.d/sandbox-env.sh 2>/dev/null; " + strings.Join(quoted, " ")
+	wrapped := []string{"su", "-s", "/bin/bash", "-c", shellCmd, user}
 	return execInContainer(ctx, t, container, wrapped)
 }
 
