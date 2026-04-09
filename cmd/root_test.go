@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 
@@ -44,6 +45,7 @@ func TestExitCode_mapping(t *testing.T) {
 		{"ConfigError", &config.ConfigError{Msg: "bad"}, 1},
 		{"TemplateError", &template.TemplateError{Msg: "bad"}, 1},
 		{"BuildError", &docker.BuildError{Msg: "build failed"}, 1},
+		{"RunError", &docker.RunError{Msg: "run failed"}, 1},
 		{"DependencyError", &docker.DependencyError{Msg: "missing"}, 3},
 		{"SecretError", &config.SecretError{Msg: "leak"}, 4},
 		{"UsageError", &usageError{err: fmt.Errorf("unknown flag")}, 2},
@@ -157,6 +159,92 @@ func TestBuildRun_missingConfig_returnsConfigError(t *testing.T) {
 				t.Errorf("exitCode = %d, want 1", got)
 			}
 		})
+	}
+}
+
+func TestBuildEnvVars_secretSet(t *testing.T) {
+	t.Setenv("MY_SECRET", "secret-value")
+	cfg := &config.Config{
+		Secrets: []string{"MY_SECRET"},
+	}
+	envVars, err := buildEnvVars(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if envVars["MY_SECRET"] != "secret-value" {
+		t.Errorf("MY_SECRET = %q, want %q", envVars["MY_SECRET"], "secret-value")
+	}
+}
+
+func TestBuildEnvVars_secretMissing(t *testing.T) {
+	t.Setenv("MY_SECRET", "")
+	// Unset it — t.Setenv sets it; we need LookupEnv to return false
+	os.Unsetenv("MY_SECRET")
+
+	cfg := &config.Config{
+		Secrets: []string{"MY_SECRET"},
+	}
+	_, err := buildEnvVars(cfg)
+	if err == nil {
+		t.Fatal("expected error for missing secret, got nil")
+	}
+	var se *config.SecretError
+	if !errors.As(err, &se) {
+		t.Fatalf("expected *config.SecretError, got %T: %v", err, err)
+	}
+	if got := exitCode(err); got != 4 {
+		t.Errorf("exitCode = %d, want 4", got)
+	}
+}
+
+func TestBuildEnvVars_secretEmpty(t *testing.T) {
+	t.Setenv("MY_SECRET", "")
+	cfg := &config.Config{
+		Secrets: []string{"MY_SECRET"},
+	}
+	envVars, err := buildEnvVars(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if envVars["MY_SECRET"] != "" {
+		t.Errorf("MY_SECRET = %q, want empty string", envVars["MY_SECRET"])
+	}
+}
+
+func TestBuildEnvVars_envCannotOverrideHostUID(t *testing.T) {
+	cfg := &config.Config{
+		Env: map[string]string{
+			"HOST_UID": "0",
+			"HOST_GID": "0",
+		},
+	}
+	envVars, err := buildEnvVars(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// HOST_UID/HOST_GID must reflect actual host user, not cfg.Env values
+	if envVars["HOST_UID"] == "0" && os.Getuid() != 0 {
+		t.Error("cfg.Env was able to override HOST_UID")
+	}
+	if envVars["HOST_GID"] == "0" && os.Getgid() != 0 {
+		t.Error("cfg.Env was able to override HOST_GID")
+	}
+}
+
+func TestBuildEnvVars_envCannotOverrideSecret(t *testing.T) {
+	t.Setenv("MY_SECRET", "real-value")
+	cfg := &config.Config{
+		Secrets: []string{"MY_SECRET"},
+		Env: map[string]string{
+			"MY_SECRET": "fake-value",
+		},
+	}
+	envVars, err := buildEnvVars(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if envVars["MY_SECRET"] != "real-value" {
+		t.Errorf("MY_SECRET = %q, want %q (secret should override cfg.Env)", envVars["MY_SECRET"], "real-value")
 	}
 }
 

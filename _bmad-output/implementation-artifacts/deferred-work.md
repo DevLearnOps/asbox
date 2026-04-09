@@ -27,3 +27,9 @@
 - Docker Compose version not pinned — fetches `latest` from GitHub API at build time, non-reproducible and subject to rate limits. [embed/Dockerfile.tmpl:75]
 - Gemini CLI requires Node.js SDK but no config validation enforces it — `npm install` will fail at build time if Node.js not configured. [embed/Dockerfile.tmpl:88]
 - Template injection via unsanitized package names and env values — config inputs injected directly into Dockerfile RUN/ENV directives without sanitization. [embed/Dockerfile.tmpl:54-56,112-114]
+
+## Deferred from: code review of story 1-7 (2026-04-09)
+
+- `-it` flag hardcoded in `RunContainer` — fails in non-TTY contexts (CI/CD, piped input) with "the input device is not a TTY." Out of scope for story 1-7 (interactive-only). [internal/docker/run.go:22]
+- Unsanitized explicit `project_name` breaks Docker image tags and container names — `sanitizeProjectName()` only runs when name is derived, not when explicitly set. Pre-existing config validation gap. [internal/config/parse.go]
+- Container name collision on concurrent `asbox run` invocations — deterministic `asbox-<project>` name means second instance fails. Single-instance by design. [cmd/run.go:49]

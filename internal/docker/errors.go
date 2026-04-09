@@ -17,3 +17,12 @@ type BuildError struct {
 func (e *BuildError) Error() string {
 	return e.Msg
 }
+
+// RunError represents a Docker run failure.
+type RunError struct {
+	Msg string
+}
+
+func (e *RunError) Error() string {
+	return e.Msg
+}

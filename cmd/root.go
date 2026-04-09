@@ -54,6 +54,7 @@ func exitCode(err error) int {
 	var ce *config.ConfigError
 	var te *template.TemplateError
 	var be *docker.BuildError
+	var re *docker.RunError
 
 	switch {
 	case errors.As(err, &ue):
@@ -62,7 +63,7 @@ func exitCode(err error) int {
 		return 3
 	case errors.As(err, &se):
 		return 4
-	case errors.As(err, &ce), errors.As(err, &te), errors.As(err, &be):
+	case errors.As(err, &ce), errors.As(err, &te), errors.As(err, &be), errors.As(err, &re):
 		return 1
 	default:
 		return 1
