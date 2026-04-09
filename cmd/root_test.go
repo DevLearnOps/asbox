@@ -117,28 +117,6 @@ func TestDockerNotFound_returnsDependencyError(t *testing.T) {
 	}
 }
 
-func TestStubCommands_returnNotImplemented(t *testing.T) {
-	// Only init is still a stub; build and run now call config.Parse()
-	for _, name := range []string{"init"} {
-		t.Run(name, func(t *testing.T) {
-			r := newRootCmd()
-			err := r.run(name)
-			if err == nil {
-				t.Fatal("expected error, got nil")
-			}
-			if !strings.Contains(err.Error(), "not implemented") {
-				t.Errorf("expected 'not implemented', got %q", err.Error())
-			}
-			var ce *config.ConfigError
-			if !errors.As(err, &ce) {
-				t.Errorf("expected *config.ConfigError, got %T", err)
-			}
-			if got := exitCode(err); got != 1 {
-				t.Errorf("exitCode = %d, want 1", got)
-			}
-		})
-	}
-}
 
 func TestBuildRun_missingConfig_returnsConfigError(t *testing.T) {
 	for _, name := range []string{"build", "run"} {

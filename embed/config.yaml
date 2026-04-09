@@ -1,2 +1,67 @@
-# Default asbox configuration
-# Placeholder - real content in Story 1.8
+# Sandbox Configuration
+# See: https://github.com/anthropics/sandbox for full documentation
+
+# AI agent to run inside the sandbox
+# Options: claude-code, gemini-cli
+agent: claude-code
+
+# SDK versions to install (comment out to skip)
+sdks:
+  nodejs: "22"
+  # go: "1.26.0"
+  python: "3.12"
+
+# Additional system packages to install
+packages:
+  - build-essential
+  - curl
+  - wget
+  - git
+  - jq
+  - yq
+
+# Host directories to mount into the sandbox
+mounts:
+  - source: ".."
+    target: "/workspace"
+
+# Auto-detect package.json files in mounts and isolate node_modules via named
+# volumes (prevents macOS/Linux native module clashes)
+# auto_isolate_deps: true
+
+# Secret names resolved from host environment variables at runtime
+# secrets:
+#   - ANTHROPIC_API_KEY
+
+# Non-secret environment variables
+# Git identity for commits inside the sandbox (avoids "Author identity unknown")
+env:
+  GIT_AUTHOR_NAME: "Sandbox User"
+  GIT_AUTHOR_EMAIL: "sandbox@localhost"
+  GIT_COMMITTER_NAME: "Sandbox User"
+  GIT_COMMITTER_EMAIL: "sandbox@localhost"
+#   NODE_ENV: development
+
+# MCP servers to pre-install
+# mcp:
+#   - playwright
+
+# Host agent config directory to mount into sandbox
+# Shares authentication and settings from host (supports OAuth/SSO)
+# WARNING: This is a read-write mount. The sandboxed agent can modify
+# your host config (settings, tokens, conversation history).
+# This is required for OAuth token refresh to stay synchronized.
+# Mount target should be OUTSIDE /home/sandbox to avoid chown conflicts.
+# The CLAUDE_CONFIG_DIR env var is set automatically for claude-code.
+# Defaults by agent:
+#   claude-code: source: "~/.claude", target: "/opt/claude-config"
+#   gemini-cli:  source: "~/.config/gemini", target: "/opt/gemini-config"
+# host_agent_config:
+#   source: "~/.claude"
+#   target: "/opt/claude-config"
+
+# BMAD multi-repo mounts for cross-repo workflows
+# Each entry is a path to a local repo that will be mounted into the sandbox
+# bmad_repos:
+#   - ../other-repo
+#   - ../shared-libs

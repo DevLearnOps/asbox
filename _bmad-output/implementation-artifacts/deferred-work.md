@@ -33,3 +33,7 @@
 - `-it` flag hardcoded in `RunContainer` — fails in non-TTY contexts (CI/CD, piped input) with "the input device is not a TTY." Out of scope for story 1-7 (interactive-only). [internal/docker/run.go:22]
 - Unsanitized explicit `project_name` breaks Docker image tags and container names — `sanitizeProjectName()` only runs when name is derived, not when explicitly set. Pre-existing config validation gap. [internal/config/parse.go]
 - Container name collision on concurrent `asbox run` invocations — deterministic `asbox-<project>` name means second instance fails. Single-instance by design. [cmd/run.go:49]
+
+## Deferred from: code review of story 1-8 (2026-04-09)
+
+- `PersistentPreRunE` override scope too broad — `initCmd` uses `PersistentPreRunE` instead of `PreRunE` to bypass Docker check, meaning any future subcommand of `init` would also skip the check silently. [cmd/init.go:13-15]
