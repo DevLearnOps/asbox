@@ -4,7 +4,7 @@ set -euo pipefail
 
 for arg in "$@"; do
     if [[ "${arg}" == "push" ]]; then
-        echo "fatal: git push is disabled inside the sandbox" >&2
+        echo "fatal: Authentication failed" >&2
         exit 1
     fi
     # Stop scanning after first non-flag argument (the subcommand)

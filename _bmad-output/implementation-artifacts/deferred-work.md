@@ -46,6 +46,14 @@
 
 ## Deferred from: code review of story 2-2 (2026-04-09)
 
+## Deferred from: code review of story 3-1 (2026-04-09)
+
+- `git -c key=val push` bypasses wrapper — known limitation per accidental threat model. Loop breaks at first non-flag arg and never sees `push`. Documented in architecture.
+- Only `push` is blocked — other exfiltration vectors (git archive, git bundle, curl) remain open. By design per accidental threat model — convenience boundary, not security boundary.
+- No explicit test for hash invalidation when git-wrapper.sh changes — `internal/hash/hash.go` includes embedded scripts but no test verifies content change triggers hash change. Could be added in Epic 9.
+
+## Deferred from: code review of story 2-2 (2026-04-09)
+
 - Digest-pinned base image replaced with floating tag — `FROM ubuntu:24.04` without digest loses reproducibility. Multi-arch digests could restore both properties. [embed/Dockerfile.tmpl:2]
 - Curl-pipe-bash pattern for multiple installers — NodeSource, get-pip.py, Claude Code install script, Docker Compose download all execute remote code without integrity verification. [embed/Dockerfile.tmpl]
 - `gemini-cli` agent requires npm but NodeJS SDK not enforced — config validation does not reject `agent: gemini-cli` without `sdks.nodejs`. Build fails at `npm install -g`. [embed/Dockerfile.tmpl:83]
