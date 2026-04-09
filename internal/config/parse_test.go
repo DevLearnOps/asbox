@@ -413,6 +413,119 @@ func TestParse_projectNameFallback(t *testing.T) {
 	}
 }
 
+func TestParse_mcpPlaywrightWithoutNodeJS(t *testing.T) {
+	dir := t.TempDir()
+	cfg := writeConfig(t, dir, `
+agent: claude-code
+mcp:
+  - playwright
+`)
+
+	_, err := Parse(cfg)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	var ce *ConfigError
+	if !errors.As(err, &ce) {
+		t.Fatalf("expected *ConfigError, got %T: %v", err, err)
+	}
+	if ce.Field != "mcp" {
+		t.Errorf("Field = %q, want %q", ce.Field, "mcp")
+	}
+	if ce.Msg != "mcp server 'playwright' requires sdks.nodejs to be configured" {
+		t.Errorf("Msg = %q", ce.Msg)
+	}
+}
+
+func TestParse_mcpPlaywrightWithNodeJS(t *testing.T) {
+	dir := t.TempDir()
+	cfg := writeConfig(t, dir, `
+agent: claude-code
+sdks:
+  nodejs: "22"
+mcp:
+  - playwright
+`)
+
+	parsed, err := Parse(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(parsed.MCP) != 1 || parsed.MCP[0] != "playwright" {
+		t.Errorf("MCP = %v, want [playwright]", parsed.MCP)
+	}
+}
+
+func TestParse_mcpUnknownServer(t *testing.T) {
+	dir := t.TempDir()
+	cfg := writeConfig(t, dir, `
+agent: claude-code
+mcp:
+  - unknown-server
+`)
+
+	_, err := Parse(cfg)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	var ce *ConfigError
+	if !errors.As(err, &ce) {
+		t.Fatalf("expected *ConfigError, got %T: %v", err, err)
+	}
+	if ce.Field != "mcp" {
+		t.Errorf("Field = %q, want %q", ce.Field, "mcp")
+	}
+	if ce.Msg != "unsupported MCP server 'unknown-server'. Supported: playwright" {
+		t.Errorf("Msg = %q", ce.Msg)
+	}
+}
+
+func TestParse_mcpDuplicate(t *testing.T) {
+	dir := t.TempDir()
+	cfg := writeConfig(t, dir, `
+agent: claude-code
+sdks:
+  nodejs: "22"
+mcp:
+  - playwright
+  - playwright
+`)
+
+	_, err := Parse(cfg)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	var ce *ConfigError
+	if !errors.As(err, &ce) {
+		t.Fatalf("expected *ConfigError, got %T: %v", err, err)
+	}
+	if ce.Field != "mcp" {
+		t.Errorf("Field = %q, want %q", ce.Field, "mcp")
+	}
+	if ce.Msg != "duplicate MCP server 'playwright'" {
+		t.Errorf("Msg = %q", ce.Msg)
+	}
+}
+
+func TestParse_mcpEmptyList(t *testing.T) {
+	dir := t.TempDir()
+	cfg := writeConfig(t, dir, `
+agent: claude-code
+mcp: []
+`)
+
+	parsed, err := Parse(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(parsed.MCP) != 0 {
+		t.Errorf("MCP = %v, want empty", parsed.MCP)
+	}
+}
+
 func TestParse_hostAgentConfigValidation(t *testing.T) {
 	dir := t.TempDir()
 	cfg := writeConfig(t, dir, `

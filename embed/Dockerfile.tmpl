@@ -96,10 +96,17 @@ RUN mv /tmp/agent-instructions.md /home/sandbox/CLAUDE.md && chown sandbox:sandb
 RUN mv /tmp/agent-instructions.md /home/sandbox/GEMINI.md && chown sandbox:sandbox /home/sandbox/GEMINI.md
 {{- end}}
 {{- end}}
-{{- if .SDKs.NodeJS}}
+{{- if .HasMCP "playwright"}}
 
-RUN npx playwright install-deps webkit
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers
+ENV PLAYWRIGHT_MCP_BROWSER=chromium
+RUN npm install -g @playwright/mcp && \
+    npx playwright install --with-deps chromium webkit && \
+    mkdir -p /opt/playwright-browsers && \
+    chown -R sandbox:sandbox /opt/playwright-browsers
 {{- end}}
+
+RUN mkdir -p /etc/sandbox && echo '{{.MCPManifestJSON}}' > /etc/sandbox/mcp-servers.json
 
 ENV TESTCONTAINERS_RYUK_DISABLED=true
 ENV TESTCONTAINERS_HOST_OVERRIDE=localhost

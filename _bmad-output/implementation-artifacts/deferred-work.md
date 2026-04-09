@@ -65,6 +65,10 @@
 - Background Podman PID not tracked for cleanup — `podman system service` launched with `&` but PID not captured. tini as PID 1 reaps orphans, so low risk. [embed/entrypoint.sh:110]
 - `AGENT_CMD` injection via shell expansion — `exec gosu sandbox bash -c "${AGENT_CMD}"` passes unsanitized input through `bash -c`. Pre-existing pattern. [embed/entrypoint.sh:140]
 
+## Deferred from: code review of story 5-1 (2026-04-09)
+
+- Misleading error message prefix in render.go — both `template.Parse` failure and embedded-FS read failure use the same "failed to render Dockerfile" prefix, making parse errors harder to diagnose. Pre-existing pattern. [internal/template/render.go:15-17]
+
 ## Deferred from: code review of story 4-2 (2026-04-09)
 
 - nc-based HTTP server has race window between connections — BusyBox nc exits after each connection, leaving a brief unbound window before the while-loop restarts it; retry loop mitigates but fragile in slow CI. [integration/inner_container_test.go:121-124]

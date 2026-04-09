@@ -486,7 +486,75 @@ func TestRender_testcontainersEnv(t *testing.T) {
 	}
 }
 
-func TestRender_playwrightDepsWithNodeJS(t *testing.T) {
+func TestRender_mcpPlaywrightBlock(t *testing.T) {
+	cfg := &config.Config{
+		Agent: "claude-code",
+		SDKs:  config.SDKConfig{NodeJS: "22"},
+		MCP:   []string{"playwright"},
+	}
+	output, err := Render(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(output, "@playwright/mcp") {
+		t.Error("expected @playwright/mcp install when MCP contains playwright")
+	}
+	if !strings.Contains(output, "playwright install --with-deps chromium webkit") {
+		t.Error("expected playwright install --with-deps chromium webkit when playwright configured")
+	}
+	if !strings.Contains(output, "PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers") {
+		t.Error("expected PLAYWRIGHT_BROWSERS_PATH env var when playwright configured")
+	}
+	if !strings.Contains(output, "PLAYWRIGHT_MCP_BROWSER=chromium") {
+		t.Error("expected PLAYWRIGHT_MCP_BROWSER env var when playwright configured")
+	}
+	if !strings.Contains(output, "chown -R sandbox:sandbox /opt/playwright-browsers") {
+		t.Error("expected chown for playwright browsers directory")
+	}
+}
+
+func TestRender_mcpManifestAlwaysPresent(t *testing.T) {
+	// Manifest should be present even without MCP
+	cfg := &config.Config{Agent: "claude-code"}
+	output, err := Render(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(output, "mcp-servers.json") {
+		t.Error("expected mcp-servers.json manifest directive even without MCP")
+	}
+}
+
+func TestRender_mcpManifestContentWithPlaywright(t *testing.T) {
+	cfg := &config.Config{
+		Agent: "claude-code",
+		SDKs:  config.SDKConfig{NodeJS: "22"},
+		MCP:   []string{"playwright"},
+	}
+	output, err := Render(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(output, `"playwright"`) {
+		t.Error("expected manifest to contain playwright entry")
+	}
+	if !strings.Contains(output, `"npx"`) {
+		t.Error("expected manifest to contain npx command")
+	}
+}
+
+func TestRender_mcpManifestContentEmpty(t *testing.T) {
+	cfg := &config.Config{Agent: "claude-code"}
+	output, err := Render(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(output, `{"mcpServers":{}}`) {
+		t.Error("expected empty manifest when no MCP configured")
+	}
+}
+
+func TestRender_noPlaywrightWithoutMCP(t *testing.T) {
 	cfg := &config.Config{
 		Agent: "claude-code",
 		SDKs:  config.SDKConfig{NodeJS: "22"},
@@ -495,19 +563,8 @@ func TestRender_playwrightDepsWithNodeJS(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(output, "npx playwright install-deps webkit") {
-		t.Error("expected Playwright webkit deps install when Node.js is configured")
-	}
-}
-
-func TestRender_noPlaywrightDepsWithoutNodeJS(t *testing.T) {
-	cfg := &config.Config{Agent: "claude-code"}
-	output, err := Render(cfg)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if strings.Contains(output, "playwright install-deps") {
-		t.Error("expected no Playwright deps install when Node.js is not configured")
+	if strings.Contains(output, "@playwright/mcp") {
+		t.Error("expected no Playwright MCP install when MCP not configured")
 	}
 }
 

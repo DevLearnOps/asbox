@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -50,6 +51,35 @@ func Parse(configPath string) (*Config, error) {
 		return nil, &ConfigError{
 			Field: "agent",
 			Msg:   fmt.Sprintf("unsupported agent '%s'. Use 'claude-code' or 'gemini-cli'", cfg.Agent),
+		}
+	}
+
+	// Validate MCP servers
+	supported := make([]string, 0, len(MCPServerRegistry))
+	for k := range MCPServerRegistry {
+		supported = append(supported, k)
+	}
+	sort.Strings(supported)
+	seen := map[string]bool{}
+	for _, mcp := range cfg.MCP {
+		if seen[mcp] {
+			return nil, &ConfigError{
+				Field: "mcp",
+				Msg:   fmt.Sprintf("duplicate MCP server '%s'", mcp),
+			}
+		}
+		seen[mcp] = true
+		if _, ok := MCPServerRegistry[mcp]; !ok {
+			return nil, &ConfigError{
+				Field: "mcp",
+				Msg:   fmt.Sprintf("unsupported MCP server '%s'. Supported: %s", mcp, strings.Join(supported, ", ")),
+			}
+		}
+	}
+	if cfg.HasMCP("playwright") && cfg.SDKs.NodeJS == "" {
+		return nil, &ConfigError{
+			Field: "mcp",
+			Msg:   "mcp server 'playwright' requires sdks.nodejs to be configured",
 		}
 	}
 
