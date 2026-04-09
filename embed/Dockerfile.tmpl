@@ -19,7 +19,43 @@ COPY git-wrapper.sh /usr/local/bin/git
 COPY healthcheck-poller.sh /usr/local/bin/healthcheck-poller.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/git /usr/local/bin/healthcheck-poller.sh
 
-{{- /* SDK installation blocks will be added by Story 1.4 */ -}}
+{{- if .SDKs.NodeJS}}
+
+{{/* Node.js SDK */}}
+ARG NODE_VERSION={{.SDKs.NodeJS}}
+RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - && \
+    apt-get install -y nodejs && \
+    rm -rf /var/lib/apt/lists/*
+{{- end}}
+{{- if .SDKs.Go}}
+
+{{/* Go SDK */}}
+ARG GO_VERSION={{.SDKs.Go}}
+RUN curl -fsSL https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz | tar -C /usr/local -xz
+ENV PATH="/usr/local/go/bin:${PATH}"
+{{- end}}
+{{- if .SDKs.Python}}
+
+{{/* Python SDK */}}
+ARG PYTHON_VERSION={{.SDKs.Python}}
+RUN apt-get update && \
+    apt-get install -y software-properties-common && \
+    add-apt-repository -y ppa:deadsnakes/ppa && \
+    apt-get update && \
+    apt-get install -y python${PYTHON_VERSION} python${PYTHON_VERSION}-venv python${PYTHON_VERSION}-dev && \
+    update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 1 && \
+    update-alternatives --install /usr/bin/python python /usr/bin/python${PYTHON_VERSION} 1 && \
+    rm -rf /var/lib/apt/lists/*
+{{- end}}
+{{- if .Packages}}
+
+{{/* Additional packages */}}
+RUN apt-get update && apt-get install -y \
+{{- range $i, $pkg := .Packages}}
+    {{$pkg}} \
+{{- end}}
+    && rm -rf /var/lib/apt/lists/*
+{{- end}}
 
 {{- /* Container scripts and tooling will be added by Story 1.5 */ -}}
 

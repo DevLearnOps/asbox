@@ -157,6 +157,203 @@ func TestRender_errorType(t *testing.T) {
 	}
 }
 
+func TestRender_nodejsOnly(t *testing.T) {
+	cfg := &config.Config{
+		Agent: "claude-code",
+		SDKs:  config.SDKConfig{NodeJS: "22"},
+	}
+	output, err := Render(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(output, "deb.nodesource.com/setup_${NODE_VERSION}.x") {
+		t.Error("expected NodeSource setup script in output")
+	}
+	if !strings.Contains(output, "apt-get install -y nodejs") {
+		t.Error("expected nodejs install in output")
+	}
+	if !strings.Contains(output, "ARG NODE_VERSION=22") {
+		t.Error("expected ARG NODE_VERSION=22 in output")
+	}
+	if strings.Contains(output, "go.dev/dl/go") {
+		t.Error("expected no Go block when Go SDK not configured")
+	}
+	if strings.Contains(output, "deadsnakes") {
+		t.Error("expected no Python block when Python SDK not configured")
+	}
+}
+
+func TestRender_pythonOnly(t *testing.T) {
+	cfg := &config.Config{
+		Agent: "claude-code",
+		SDKs:  config.SDKConfig{Python: "3.12"},
+	}
+	output, err := Render(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(output, "deadsnakes/ppa") {
+		t.Error("expected deadsnakes PPA in output")
+	}
+	if !strings.Contains(output, "python${PYTHON_VERSION}") {
+		t.Error("expected python${PYTHON_VERSION} install in output")
+	}
+	if !strings.Contains(output, "ARG PYTHON_VERSION=3.12") {
+		t.Error("expected ARG PYTHON_VERSION=3.12 in output")
+	}
+	if strings.Contains(output, "nodesource") {
+		t.Error("expected no Node.js block when NodeJS not configured")
+	}
+	if strings.Contains(output, "go.dev/dl/go") {
+		t.Error("expected no Go block when Go SDK not configured")
+	}
+}
+
+func TestRender_goOnly(t *testing.T) {
+	cfg := &config.Config{
+		Agent: "claude-code",
+		SDKs:  config.SDKConfig{Go: "1.23"},
+	}
+	output, err := Render(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(output, "go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz") {
+		t.Error("expected Go tarball download in output")
+	}
+	if !strings.Contains(output, `ENV PATH="/usr/local/go/bin:${PATH}"`) {
+		t.Error("expected Go PATH setup in output")
+	}
+	if !strings.Contains(output, "ARG GO_VERSION=1.23") {
+		t.Error("expected ARG GO_VERSION=1.23 in output")
+	}
+	if strings.Contains(output, "nodesource") {
+		t.Error("expected no Node.js block when NodeJS not configured")
+	}
+	if strings.Contains(output, "deadsnakes") {
+		t.Error("expected no Python block when Python not configured")
+	}
+}
+
+func TestRender_multipleSDKs(t *testing.T) {
+	cfg := &config.Config{
+		Agent: "claude-code",
+		SDKs:  config.SDKConfig{NodeJS: "22", Python: "3.12"},
+	}
+	output, err := Render(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(output, "nodesource") {
+		t.Error("expected Node.js block in output")
+	}
+	if !strings.Contains(output, "deadsnakes") {
+		t.Error("expected Python block in output")
+	}
+	if strings.Contains(output, "go.dev/dl/go") {
+		t.Error("expected no Go block when Go SDK not configured")
+	}
+}
+
+func TestRender_allSDKs(t *testing.T) {
+	cfg := &config.Config{
+		Agent: "claude-code",
+		SDKs:  config.SDKConfig{NodeJS: "22", Go: "1.23", Python: "3.12"},
+	}
+	output, err := Render(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(output, "nodesource") {
+		t.Error("expected Node.js block in output")
+	}
+	if !strings.Contains(output, "go.dev/dl/go") {
+		t.Error("expected Go block in output")
+	}
+	if !strings.Contains(output, "deadsnakes") {
+		t.Error("expected Python block in output")
+	}
+}
+
+func TestRender_noSDKs(t *testing.T) {
+	cfg := &config.Config{Agent: "claude-code"}
+	output, err := Render(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(output, "nodesource") {
+		t.Error("expected no Node.js block when no SDKs configured")
+	}
+	if strings.Contains(output, "go.dev") {
+		t.Error("expected no Go block when no SDKs configured")
+	}
+	if strings.Contains(output, "deadsnakes") {
+		t.Error("expected no Python block when no SDKs configured")
+	}
+}
+
+func TestRender_additionalPackages(t *testing.T) {
+	cfg := &config.Config{
+		Agent:    "claude-code",
+		Packages: []string{"libpq-dev", "redis-tools"},
+	}
+	output, err := Render(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(output, "libpq-dev") {
+		t.Error("expected libpq-dev in additional packages block")
+	}
+	if !strings.Contains(output, "redis-tools") {
+		t.Error("expected redis-tools in additional packages block")
+	}
+}
+
+func TestRender_noPackages(t *testing.T) {
+	cfg := &config.Config{Agent: "claude-code"}
+	output, err := Render(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Count how many apt-get install lines there are — should only be the base packages one
+	count := strings.Count(output, "apt-get install")
+	if count != 1 {
+		t.Errorf("expected exactly 1 apt-get install (base packages only), found %d", count)
+	}
+}
+
+func TestRender_noBlankLinesWithoutSDKs(t *testing.T) {
+	cfg := &config.Config{Agent: "claude-code"}
+	output, err := Render(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// When no SDKs are configured, there should be no SDK-related content
+	// between the chmod scripts line and the ENTRYPOINT line
+	chmodIdx := strings.Index(output, "chmod +x")
+	entrypointIdx := strings.Index(output, "ENTRYPOINT")
+	if chmodIdx < 0 || entrypointIdx < 0 {
+		t.Fatal("expected chmod and ENTRYPOINT in output")
+	}
+	between := output[chmodIdx:entrypointIdx]
+	// Should not contain any SDK-related keywords
+	if strings.Contains(between, "nodesource") {
+		t.Error("found Node.js block between scripts and ENTRYPOINT when no SDKs configured")
+	}
+	if strings.Contains(between, "go.dev") {
+		t.Error("found Go block between scripts and ENTRYPOINT when no SDKs configured")
+	}
+	if strings.Contains(between, "deadsnakes") {
+		t.Error("found Python block between scripts and ENTRYPOINT when no SDKs configured")
+	}
+	// Check no extra blank lines in the SDK region (between chmod line end and ENTRYPOINT)
+	chmodLineEnd := strings.Index(output[chmodIdx:], "\n") + chmodIdx
+	region := output[chmodLineEnd:entrypointIdx]
+	if strings.Contains(region, "\n\n\n") {
+		t.Errorf("found excessive blank lines in SDK region when no SDKs configured:\n%s", region)
+	}
+}
+
 func firstLine(s string) string {
 	if idx := strings.Index(s, "\n"); idx >= 0 {
 		return s[:idx]
