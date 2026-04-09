@@ -36,6 +36,8 @@
 
 generated: "2026-04-08"
 last_updated: "2026-04-09"
+
+
 project: ai-sandbox
 project_key: NOKEY
 tracking_system: file-system
@@ -82,8 +84,8 @@ development_status:
   epic-6-retrospective: optional
 
   # Epic 7: Developer Can Share Host Agent Authentication
-  epic-7: backlog
-  7-1-host-agent-config-mount-for-oauth-token-sync: backlog
+  epic-7: in-progress
+  7-1-host-agent-config-mount-for-oauth-token-sync: done
   epic-7-retrospective: optional
 
   # Epic 8: Developer Can Run Multi-Repo BMAD Workflows

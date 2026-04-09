@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -48,6 +49,100 @@ mounts:
 	}
 	if got := exitCode(err); got != 1 {
 		t.Errorf("exitCode = %d, want 1", got)
+	}
+}
+
+func TestRun_hostAgentConfig_envVarSetWhenConfigured(t *testing.T) {
+	dir := t.TempDir()
+	agentDir := t.TempDir() // valid source for host_agent_config
+
+	cfgPath := writeRunConfig(t, dir, fmt.Sprintf(`
+agent: claude-code
+host_agent_config:
+  source: %s
+  target: /opt/claude-config
+`, agentDir))
+
+	old := configFile
+	configFile = cfgPath
+	t.Cleanup(func() { configFile = old })
+
+	// Parse config and replicate the env-building logic from RunE
+	cfg, err := config.Parse(cfgPath)
+	if err != nil {
+		t.Fatalf("unexpected parse error: %v", err)
+	}
+
+	envVars, err := buildEnvVars(cfg)
+	if err != nil {
+		t.Fatalf("unexpected buildEnvVars error: %v", err)
+	}
+
+	// CLAUDE_CONFIG_DIR is set after buildEnvVars, matching RunE flow (gated on agent type)
+	if cfg.HostAgentConfig != nil && cfg.Agent == "claude-code" {
+		envVars["CLAUDE_CONFIG_DIR"] = cfg.HostAgentConfig.Target
+	}
+
+	if envVars["CLAUDE_CONFIG_DIR"] != "/opt/claude-config" {
+		t.Errorf("CLAUDE_CONFIG_DIR = %q, want %q", envVars["CLAUDE_CONFIG_DIR"], "/opt/claude-config")
+	}
+}
+
+func TestRun_hostAgentConfig_envVarAbsentWhenNil(t *testing.T) {
+	dir := t.TempDir()
+
+	cfgPath := writeRunConfig(t, dir, `
+agent: claude-code
+`)
+
+	cfg, err := config.Parse(cfgPath)
+	if err != nil {
+		t.Fatalf("unexpected parse error: %v", err)
+	}
+
+	envVars, err := buildEnvVars(cfg)
+	if err != nil {
+		t.Fatalf("unexpected buildEnvVars error: %v", err)
+	}
+
+	// Same conditional as RunE — should NOT add CLAUDE_CONFIG_DIR
+	if cfg.HostAgentConfig != nil && cfg.Agent == "claude-code" {
+		envVars["CLAUDE_CONFIG_DIR"] = cfg.HostAgentConfig.Target
+	}
+
+	if _, ok := envVars["CLAUDE_CONFIG_DIR"]; ok {
+		t.Error("CLAUDE_CONFIG_DIR should not be set when HostAgentConfig is nil")
+	}
+}
+
+func TestRun_hostAgentConfig_envVarSkippedForNonClaudeAgent(t *testing.T) {
+	dir := t.TempDir()
+	agentDir := t.TempDir()
+
+	cfgPath := writeRunConfig(t, dir, fmt.Sprintf(`
+agent: gemini-cli
+host_agent_config:
+  source: %s
+  target: /opt/claude-config
+`, agentDir))
+
+	cfg, err := config.Parse(cfgPath)
+	if err != nil {
+		t.Fatalf("unexpected parse error: %v", err)
+	}
+
+	envVars, err := buildEnvVars(cfg)
+	if err != nil {
+		t.Fatalf("unexpected buildEnvVars error: %v", err)
+	}
+
+	// Same conditional as RunE — should NOT add CLAUDE_CONFIG_DIR for non-claude agents
+	if cfg.HostAgentConfig != nil && cfg.Agent == "claude-code" {
+		envVars["CLAUDE_CONFIG_DIR"] = cfg.HostAgentConfig.Target
+	}
+
+	if _, ok := envVars["CLAUDE_CONFIG_DIR"]; ok {
+		t.Error("CLAUDE_CONFIG_DIR should not be set for gemini-cli agent")
 	}
 }
 

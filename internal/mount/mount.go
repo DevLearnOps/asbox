@@ -10,11 +10,16 @@ import (
 // AssembleMounts validates mount source paths exist and returns "source:target" strings
 // for passing as Docker -v flags.
 func AssembleMounts(cfg *config.Config) ([]string, error) {
-	if len(cfg.Mounts) == 0 {
+	if len(cfg.Mounts) == 0 && cfg.HostAgentConfig == nil {
 		return nil, nil
 	}
 
-	mounts := make([]string, 0, len(cfg.Mounts))
+	capacity := len(cfg.Mounts)
+	if cfg.HostAgentConfig != nil {
+		capacity++
+	}
+
+	mounts := make([]string, 0, capacity)
 	for _, m := range cfg.Mounts {
 		if _, err := os.Stat(m.Source); err != nil {
 			if os.IsNotExist(err) {
@@ -28,5 +33,26 @@ func AssembleMounts(cfg *config.Config) ([]string, error) {
 		}
 		mounts = append(mounts, m.Source+":"+m.Target)
 	}
+
+	if cfg.HostAgentConfig != nil {
+		info, err := os.Stat(cfg.HostAgentConfig.Source)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil, &config.ConfigError{
+					Msg: fmt.Sprintf("host_agent_config source '%s' not found. Check host_agent_config in .asbox/config.yaml", cfg.HostAgentConfig.Source),
+				}
+			}
+			return nil, &config.ConfigError{
+				Msg: fmt.Sprintf("host_agent_config source '%s': %s", cfg.HostAgentConfig.Source, err),
+			}
+		}
+		if !info.IsDir() {
+			return nil, &config.ConfigError{
+				Msg: fmt.Sprintf("host_agent_config source '%s' is not a directory. Check host_agent_config in .asbox/config.yaml", cfg.HostAgentConfig.Source),
+			}
+		}
+		mounts = append(mounts, cfg.HostAgentConfig.Source+":"+cfg.HostAgentConfig.Target)
+	}
+
 	return mounts, nil
 }

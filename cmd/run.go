@@ -32,6 +32,11 @@ var runCmd = &cobra.Command{
 			return err
 		}
 
+		// Mount host agent config directory (e.g. ~/.claude) for OAuth token sync
+		if cfg.HostAgentConfig != nil && cfg.Agent == "claude-code" {
+			envVars["CLAUDE_CONFIG_DIR"] = cfg.HostAgentConfig.Target
+		}
+
 		// Auto-isolate platform dependencies via named volumes
 		if cfg.AutoIsolateDeps {
 			scanResults, err := mount.ScanDeps(cfg)
