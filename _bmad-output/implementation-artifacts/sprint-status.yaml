@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: "2026-04-08"
-last_updated: "2026-04-09"  # story 4-1 done
+last_updated: "2026-04-09"  # story 4-2 done
 project: ai-sandbox
 project_key: NOKEY
 tracking_system: file-system
@@ -68,7 +68,7 @@ development_status:
   # Epic 4: Agent Can Build and Run Docker Services
   epic-4: in-progress
   4-1-podman-installation-and-docker-alias: done
-  4-2-inner-container-building-and-orchestration: backlog
+  4-2-inner-container-building-and-orchestration: done
   epic-4-retrospective: optional
 
   # Epic 5: Agent Can Run Browser Tests via MCP

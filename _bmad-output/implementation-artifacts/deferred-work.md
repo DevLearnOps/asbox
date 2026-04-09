@@ -64,3 +64,9 @@
 - `docker/docker` +incompatible in main require block — test-only dependency (`github.com/docker/docker`) is in the production `require` section of `go.mod`. Could be isolated to a test-only module. [go.mod]
 - Background Podman PID not tracked for cleanup — `podman system service` launched with `&` but PID not captured. tini as PID 1 reaps orphans, so low risk. [embed/entrypoint.sh:110]
 - `AGENT_CMD` injection via shell expansion — `exec gosu sandbox bash -c "${AGENT_CMD}"` passes unsanitized input through `bash -c`. Pre-existing pattern. [embed/entrypoint.sh:140]
+
+## Deferred from: code review of story 4-2 (2026-04-09)
+
+- nc-based HTTP server has race window between connections — BusyBox nc exits after each connection, leaving a brief unbound window before the while-loop restarts it; retry loop mitigates but fragile in slow CI. [integration/inner_container_test.go:121-124]
+- Docker Compose binary and apt packages are unpinned — all packages in the Podman RUN block use latest versions, consistent with existing project convention. [embed/Dockerfile.tmpl:61,72]
+- No context timeout on integration tests — all integration test files use context.Background() with no deadline; tests can hang indefinitely. Consistent across the test suite. [integration/inner_container_test.go]

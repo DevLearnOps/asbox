@@ -58,7 +58,7 @@ RUN apt-get update && apt-get install -y \
 {{- end}}
 
 RUN apt-get update && \
-    apt-get install -y uidmap slirp4netns && \
+    apt-get install -y uidmap slirp4netns iproute2 iptables && \
     curl -fsSL "https://download.opensuse.org/repositories/devel:kubic:libcontainers:unstable/xUbuntu_$(lsb_release -rs)/Release.key" | gpg --dearmor -o /etc/apt/keyrings/kubic.gpg && \
     echo "deb [signed-by=/etc/apt/keyrings/kubic.gpg] https://download.opensuse.org/repositories/devel:kubic:libcontainers:unstable/xUbuntu_$(lsb_release -rs)/ /" > /etc/apt/sources.list.d/kubic.list && \
     apt-get update && \
