@@ -98,6 +98,7 @@ func TestRender_noEnvVars(t *testing.T) {
 		`ENV NPM_CONFIG_PREFIX=/home/sandbox/.npm-global`:            true,
 		`ENV PATH="/home/sandbox/.npm-global/bin:${PATH}"`:           true,
 		`ENV PATH="/home/sandbox/.local/bin:${PATH}"`:                true,
+		`ENV HOME=/home/sandbox`:                                      true,
 	}
 	for _, line := range strings.Split(output, "\n") {
 		trimmed := strings.TrimSpace(line)

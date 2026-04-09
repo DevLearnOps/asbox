@@ -77,6 +77,7 @@ RUN COMPOSE_VERSION=$(curl -fsSL https://api.github.com/repos/docker/compose/rel
 {{- if eq .Agent "claude-code"}}
 
 USER sandbox
+ENV HOME=/home/sandbox
 RUN curl -fsSL https://claude.ai/install.sh | bash
 ENV PATH="/home/sandbox/.local/bin:${PATH}"
 USER root
