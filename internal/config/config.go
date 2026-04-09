@@ -1,5 +1,7 @@
 package config
 
+import "slices"
+
 import "encoding/json"
 
 // MCPServerEntry represents an MCP server in the manifest.
@@ -42,12 +44,7 @@ type SDKConfig struct {
 
 // HasMCP returns true if the named MCP server is in the config.
 func (c *Config) HasMCP(name string) bool {
-	for _, m := range c.MCP {
-		if m == name {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(c.MCP, name)
 }
 
 // MCPManifestJSON returns the MCP manifest JSON string for embedding in the Dockerfile.

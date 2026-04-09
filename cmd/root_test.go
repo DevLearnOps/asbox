@@ -117,7 +117,6 @@ func TestDockerNotFound_returnsDependencyError(t *testing.T) {
 	}
 }
 
-
 func TestBuildRun_missingConfig_returnsConfigError(t *testing.T) {
 	for _, name := range []string{"build", "run"} {
 		t.Run(name, func(t *testing.T) {

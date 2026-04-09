@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"strconv"
 
@@ -29,6 +30,26 @@ var runCmd = &cobra.Command{
 		envVars, err := buildEnvVars(cfg)
 		if err != nil {
 			return err
+		}
+
+		// Auto-isolate platform dependencies via named volumes
+		if cfg.AutoIsolateDeps {
+			scanResults, err := mount.ScanDeps(cfg)
+			if err != nil {
+				return err
+			}
+
+			fmt.Fprintf(cmd.OutOrStdout(), "auto_isolate_deps: scanned %d mount paths, found %d package.json files\n", len(cfg.Mounts), len(scanResults))
+
+			for _, r := range scanResults {
+				fmt.Fprintf(cmd.OutOrStdout(), "isolating: %s (volume: %s)\n", r.ContainerPath, r.VolumeName)
+			}
+
+			if len(scanResults) > 0 {
+				volumeFlags, autoIsolatePaths := mount.AssembleIsolateDeps(scanResults)
+				mountFlags = append(mountFlags, volumeFlags...)
+				envVars["AUTO_ISOLATE_VOLUME_PATHS"] = autoIsolatePaths
+			}
 		}
 
 		agentCmd, err := agentCommand(cfg.Agent)
@@ -68,9 +89,7 @@ func buildEnvVars(cfg *config.Config) (map[string]string, error) {
 	envVars := make(map[string]string)
 
 	// Custom env vars from config (lowest priority)
-	for k, v := range cfg.Env {
-		envVars[k] = v
-	}
+	maps.Copy(envVars, cfg.Env)
 
 	// Validate and inject secrets (overwrite any cfg.Env collision)
 	for _, secret := range cfg.Secrets {

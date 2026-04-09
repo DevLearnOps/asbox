@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: "2026-04-08"
-last_updated: "2026-04-09"  # story 5-1 done
+last_updated: "2026-04-09"
 project: ai-sandbox
 project_key: NOKEY
 tracking_system: file-system
@@ -77,8 +77,8 @@ development_status:
   epic-5-retrospective: optional
 
   # Epic 6: Developer Can Isolate Platform Dependencies Automatically
-  epic-6: backlog
-  6-1-auto-dependency-isolation-via-named-volumes: backlog
+  epic-6: in-progress
+  6-1-auto-dependency-isolation-via-named-volumes: done
   epic-6-retrospective: optional
 
   # Epic 7: Developer Can Share Host Agent Authentication

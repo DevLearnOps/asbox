@@ -92,15 +92,15 @@ func TestRender_noEnvVars(t *testing.T) {
 	}
 	// Check there are no user-defined ENV directives (Testcontainers and PATH ENVs are expected)
 	knownEnvs := map[string]bool{
-		`ENV TESTCONTAINERS_RYUK_DISABLED=true`:                      true,
-		`ENV TESTCONTAINERS_HOST_OVERRIDE=localhost`:                  true,
-		`ENV PATH="/usr/local/go/bin:${PATH}"`:                       true,
-		`ENV NPM_CONFIG_PREFIX=/home/sandbox/.npm-global`:            true,
-		`ENV PATH="/home/sandbox/.npm-global/bin:${PATH}"`:           true,
-		`ENV PATH="/home/sandbox/.local/bin:${PATH}"`:                true,
-		`ENV HOME=/home/sandbox`:                                      true,
+		`ENV TESTCONTAINERS_RYUK_DISABLED=true`:            true,
+		`ENV TESTCONTAINERS_HOST_OVERRIDE=localhost`:       true,
+		`ENV PATH="/usr/local/go/bin:${PATH}"`:             true,
+		`ENV NPM_CONFIG_PREFIX=/home/sandbox/.npm-global`:  true,
+		`ENV PATH="/home/sandbox/.npm-global/bin:${PATH}"`: true,
+		`ENV PATH="/home/sandbox/.local/bin:${PATH}"`:      true,
+		`ENV HOME=/home/sandbox`:                           true,
 	}
-	for _, line := range strings.Split(output, "\n") {
+	for line := range strings.SplitSeq(output, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "ENV ") && !knownEnvs[trimmed] {
 			t.Errorf("expected no user ENV directives, found: %s", line)
@@ -599,8 +599,8 @@ func TestRender_goSDKMultiArch(t *testing.T) {
 }
 
 func firstLine(s string) string {
-	if idx := strings.Index(s, "\n"); idx >= 0 {
-		return s[:idx]
+	if before, _, ok := strings.Cut(s, "\n"); ok {
+		return before
 	}
 	return s
 }

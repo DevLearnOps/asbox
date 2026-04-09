@@ -74,3 +74,10 @@
 - nc-based HTTP server has race window between connections — BusyBox nc exits after each connection, leaving a brief unbound window before the while-loop restarts it; retry loop mitigates but fragile in slow CI. [integration/inner_container_test.go:121-124]
 - Docker Compose binary and apt packages are unpinned — all packages in the Podman RUN block use latest versions, consistent with existing project convention. [embed/Dockerfile.tmpl:61,72]
 - No context timeout on integration tests — all integration test files use context.Background() with no deadline; tests can hang indefinitely. Consistent across the test suite. [integration/inner_container_test.go]
+
+## Deferred from: code review of story 6-1 (2026-04-09)
+
+- Comma in directory names breaks entrypoint `chown_volumes` IFS parsing — `AUTO_ISOLATE_VOLUME_PATHS` uses comma-separated format; a directory name containing a comma produces an unparseable value. Requires entrypoint change (out of scope per spec). [internal/mount/isolate_deps.go:93, embed/entrypoint.sh:52]
+- Symlinked subdirectories in monorepos silently skipped by `filepath.WalkDir` — monorepos using symlinks for shared packages won't get isolation volumes. Adding symlink following risks cycles. [internal/mount/isolate_deps.go:27]
+- Multiple mounts to same container target can produce duplicate volume entries — two mounts with same Target and same relative package.json produce two ScanResults for the same container path; Docker uses last-one-wins. [internal/mount/isolate_deps.go:26-56]
+- `project_name` special chars amplified to volume names — pre-existing unsanitized explicit project_name (tracked in story 1-7 review) now also affects Docker named volume names, not just container names. [internal/mount/isolate_deps.go:61]

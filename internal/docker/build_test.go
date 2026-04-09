@@ -95,9 +95,9 @@ func TestBuildImage_commandAssembly(t *testing.T) {
 			name: "single tag",
 			opts: BuildOptions{
 				RenderedDockerfile: "FROM ubuntu:24.04\n",
-				Tags:              []string{"asbox-test:abc123"},
-				Stdout:            &bytes.Buffer{},
-				Stderr:            &bytes.Buffer{},
+				Tags:               []string{"asbox-test:abc123"},
+				Stdout:             &bytes.Buffer{},
+				Stderr:             &bytes.Buffer{},
 			},
 			want: []string{"-t", "asbox-test:abc123"},
 		},
@@ -105,9 +105,9 @@ func TestBuildImage_commandAssembly(t *testing.T) {
 			name: "multiple tags",
 			opts: BuildOptions{
 				RenderedDockerfile: "FROM ubuntu:24.04\n",
-				Tags:              []string{"asbox-test:abc123", "asbox-test:latest"},
-				Stdout:            &bytes.Buffer{},
-				Stderr:            &bytes.Buffer{},
+				Tags:               []string{"asbox-test:abc123", "asbox-test:latest"},
+				Stdout:             &bytes.Buffer{},
+				Stderr:             &bytes.Buffer{},
 			},
 			want: []string{"-t", "asbox-test:abc123", "-t", "asbox-test:latest"},
 		},
@@ -115,10 +115,10 @@ func TestBuildImage_commandAssembly(t *testing.T) {
 			name: "with build args",
 			opts: BuildOptions{
 				RenderedDockerfile: "FROM ubuntu:24.04\n",
-				Tags:              []string{"asbox-test:abc123"},
-				BuildArgs:         []string{"--build-arg", "NODE_VERSION=22"},
-				Stdout:            &bytes.Buffer{},
-				Stderr:            &bytes.Buffer{},
+				Tags:               []string{"asbox-test:abc123"},
+				BuildArgs:          []string{"--build-arg", "NODE_VERSION=22"},
+				Stdout:             &bytes.Buffer{},
+				Stderr:             &bytes.Buffer{},
 			},
 			want: []string{"--build-arg", "NODE_VERSION=22", "-t", "asbox-test:abc123"},
 		},
@@ -140,9 +140,9 @@ func TestBuildImage_commandAssembly(t *testing.T) {
 func TestBuildImage_tagFormatting(t *testing.T) {
 	opts := BuildOptions{
 		RenderedDockerfile: "FROM ubuntu\n",
-		Tags:              []string{"asbox-myproject:a1b2c3d4e5f6", "asbox-myproject:latest"},
-		Stdout:            &bytes.Buffer{},
-		Stderr:            &bytes.Buffer{},
+		Tags:               []string{"asbox-myproject:a1b2c3d4e5f6", "asbox-myproject:latest"},
+		Stdout:             &bytes.Buffer{},
+		Stderr:             &bytes.Buffer{},
 	}
 	args := buildCmdArgs(opts, "/tmp/df", "/tmp/ctx")
 	// Count -t flags

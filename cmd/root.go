@@ -6,10 +6,10 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/spf13/cobra"
 	"github.com/mcastellin/asbox/internal/config"
 	"github.com/mcastellin/asbox/internal/docker"
 	"github.com/mcastellin/asbox/internal/template"
+	"github.com/spf13/cobra"
 )
 
 var version = "dev"

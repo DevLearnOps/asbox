@@ -31,8 +31,8 @@ func TestCompute_hexChars(t *testing.T) {
 
 func TestCompute_differentInputs(t *testing.T) {
 	tests := []struct {
-		name   string
-		a, b   []string
+		name string
+		a, b []string
 	}{
 		{
 			name: "different dockerfile",

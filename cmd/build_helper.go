@@ -60,11 +60,11 @@ func ensureBuild(cfg *config.Config, cmd *cobra.Command) (string, bool, error) {
 
 	opts := docker.BuildOptions{
 		RenderedDockerfile: renderedDockerfile,
-		BuildArgs:         docker.BuildArgs(cfg),
-		Tags:              []string{imageRef, latestRef},
-		EmbeddedFiles:     embeddedFiles,
-		Stdout:            cmd.OutOrStdout(),
-		Stderr:            cmd.ErrOrStderr(),
+		BuildArgs:          docker.BuildArgs(cfg),
+		Tags:               []string{imageRef, latestRef},
+		EmbeddedFiles:      embeddedFiles,
+		Stdout:             cmd.OutOrStdout(),
+		Stderr:             cmd.ErrOrStderr(),
 	}
 
 	if err := docker.BuildImage(opts); err != nil {
