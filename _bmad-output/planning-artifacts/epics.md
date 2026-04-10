@@ -244,6 +244,10 @@ A developer can configure multiple repositories that get auto-mounted into the s
 Comprehensive integration tests verify sandbox lifecycle, mounts, secrets, isolation, inner containers, MCP, auto_isolate_deps, and bmad_repos with parallel Go test execution.
 **FRs covered:** NFR15
 
+### Epic 10: Remove Legacy Bash Implementation
+Remove all files from the original bash sandbox implementation that have been fully replaced by the Go rewrite. Update documentation to reflect the Go project structure.
+**FRs covered:** N/A (cleanup)
+
 ## Epic 1: Developer Can Build and Launch a Sandbox
 
 A developer can install the `asbox` binary, create a configuration file, build a container image, and launch an interactive sandbox session with a working agent inside.
@@ -976,3 +980,43 @@ So that advanced features are validated automatically.
 - `integration/mcp_test.go` — manifest presence, .mcp.json generation
 - `integration/isolate_deps_test.go` — named volume creation verification (check via `docker inspect`)
 - `integration/bmad_repos_test.go` — mount verification, instruction file presence
+
+## Epic 10: Remove Legacy Bash Implementation
+
+Remove all files from the original bash sandbox implementation that have been fully replaced by the Go rewrite. Update documentation to reflect the Go project structure.
+
+### Story 10.1: Remove Bash Sandbox Files and Update README
+
+As a developer,
+I want the legacy bash sandbox files removed and the README updated to reflect the Go CLI,
+So that the repository contains only the canonical Go implementation with accurate documentation.
+
+**Acceptance Criteria:**
+
+**Given** the Go rewrite is complete (all Epics 1-9 stories done)
+**When** the cleanup story is executed
+**Then** the following files/directories are deleted:
+- `sandbox.sh` (original bash CLI entry point)
+- `scripts/` (bash entrypoint.sh, git-wrapper.sh, healthcheck-poller.sh, agent-instructions.md)
+- `tests/` (bash integration test suite and fixtures)
+- `Dockerfile.template` (bash-era Dockerfile template)
+- `podman/` (empty leftover directory)
+
+**Given** the bash files are removed
+**When** inspecting the repository
+**Then** no remaining file outside `_bmad-output/` references the deleted files as current/active code
+
+**Given** the README.md currently documents the bash implementation
+**When** the cleanup story is executed
+**Then** README.md is rewritten to document the Go CLI:
+- Installation via single binary (not `ln -s sandbox.sh`)
+- `asbox` command reference (not `sandbox` command)
+- Go project structure (`cmd/`, `internal/`, `embed/`, `integration/`)
+- `go test` for testing (not `bash tests/test_sandbox.sh`)
+- Build caching via content-hash (referencing Go implementation)
+- Remove all references to `sandbox.sh`, `Dockerfile.template`, `scripts/`, `tests/`
+
+**Implementation Notes:**
+- Pure deletion + documentation rewrite — no Go code changes
+- Historical references in `_bmad-output/` implementation artifacts are left intact (they document the migration journey)
+- The `Makefile` has no bash references and needs no changes

@@ -109,3 +109,7 @@
 - `not_reachable_from_outside` subtest uses proxy check — inspects outer container's `NetworkSettings.Ports` for no bindings rather than attempting an actual connection from the host. Necessary but not sufficient condition. [inner_container_test.go:144-169]
 - `ls` locale-dependent error message in credential path tests — `strings.Contains(output, "No such file or directory")` is locale-dependent; exit code check alone would be more portable. [isolation_test.go:53-69]
 - FR36 private network bridge coverage is partial — DNS resolution test proves inter-service connectivity but doesn't assert network isolation from host or other outer containers. [inner_container_test.go:100-109]
+
+## Deferred from: code review of story 10-1 (2026-04-10)
+
+- `go install github.com/mcastellin/asbox@latest` in README assumes the repo is published to that Go module path — instruction will fail until a version tag is pushed. Module path matches `go.mod` but no release exists yet. [README.md:42]
