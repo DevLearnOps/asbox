@@ -1,6 +1,6 @@
 # Story 6.1: Auto Dependency Isolation via Named Volumes
 
-Status: in-progress
+Status: done
 
 ## Story
 
@@ -56,19 +56,19 @@ So that macOS-compiled native modules don't crash inside the Linux sandbox.
 
 ### Rework: Extend scan to bmad_repos (sprint-change-proposal-2026-04-10)
 
-- [ ] Task 6: Extend `ScanDeps()` to scan `cfg.BmadRepos` paths (AC: #3, #4, #5)
-  - [ ] After iterating `cfg.Mounts`, iterate `cfg.BmadRepos` entries
-  - [ ] For each bmad repo: use host path as walk root, derive container target from `/workspace/repos/<basename>` convention (not from mount target config)
-  - [ ] Reuse existing `buildVolumeName()` and `buildContainerPath()` — container path base is `/workspace/repos/<basename>` instead of `m.Target`
-  - [ ] Include bmad_repos count in the scan summary log (N = primary mounts + bmad repos)
-- [ ] Task 7: Unit tests for bmad_repos scanning in `internal/mount/isolate_deps_test.go` (AC: #3, #4, #5)
-  - [ ] Test: single bmad repo with root `package.json` → volume mount with container path under `/workspace/repos/<basename>/node_modules`
-  - [ ] Test: bmad repo with nested `package.json` files (monorepo) → multiple volume mounts with correct paths
-  - [ ] Test: combined config with primary mounts AND bmad_repos → all `package.json` files discovered across both
-  - [ ] Test: bmad_repos with no `package.json` → included in scan count N but contributes 0 to M
-  - [ ] Test: volume naming for bmad repos uses project name and path relative to repo root
-- [ ] Task 8: Update scan summary log in `cmd/run.go` (AC: #5)
-  - [ ] Mount count N must include both `len(cfg.Mounts)` and `len(cfg.BmadRepos)`
+- [x] Task 6: Extend `ScanDeps()` to scan `cfg.BmadRepos` paths (AC: #3, #4, #5)
+  - [x] After iterating `cfg.Mounts`, iterate `cfg.BmadRepos` entries
+  - [x] For each bmad repo: use host path as walk root, derive container target from `/workspace/repos/<basename>` convention (not from mount target config)
+  - [x] Reuse existing `buildVolumeName()` and `buildContainerPath()` — container path base is `/workspace/repos/<basename>` instead of `m.Target`
+  - [x] Include bmad_repos count in the scan summary log (N = primary mounts + bmad repos)
+- [x] Task 7: Unit tests for bmad_repos scanning in `internal/mount/isolate_deps_test.go` (AC: #3, #4, #5)
+  - [x] Test: single bmad repo with root `package.json` → volume mount with container path under `/workspace/repos/<basename>/node_modules`
+  - [x] Test: bmad repo with nested `package.json` files (monorepo) → multiple volume mounts with correct paths
+  - [x] Test: combined config with primary mounts AND bmad_repos → all `package.json` files discovered across both
+  - [x] Test: bmad_repos with no `package.json` → included in scan count N but contributes 0 to M
+  - [x] Test: volume naming for bmad repos uses project name and path relative to repo root
+- [x] Task 8: Update scan summary log in `cmd/run.go` (AC: #5)
+  - [x] Mount count N must include both `len(cfg.Mounts)` and `len(cfg.BmadRepos)`
 
 ### Review Findings
 
@@ -77,6 +77,13 @@ So that macOS-compiled native modules don't crash inside the Linux sandbox.
 - [x] [Review][Defer] Symlinked subdirectories in monorepos silently skipped by `filepath.WalkDir` — Go stdlib limitation, adding follow would risk cycles [internal/mount/isolate_deps.go:27] — deferred, known WalkDir behavior
 - [x] [Review][Defer] Multiple mounts to same container target can produce duplicate volume entries — unusual config edge case [internal/mount/isolate_deps.go:26-56] — deferred, edge case
 - [x] [Review][Defer] `project_name` special chars amplified to volume names — pre-existing, already tracked in deferred-work.md [internal/mount/isolate_deps.go:61] — deferred, pre-existing
+
+#### Rework Review Findings (2026-04-10)
+
+- [x] [Review][Decision] Volume name collision across primary mounts and bmad_repos — `buildVolumeName` uses only `projectName` + `relPath` with no source-type discriminator; a mount root and bmad_repo root both produce `asbox-<project>-node_modules`, and multiple bmad_repos with root `package.json` also collide; Docker would share the same named volume across different container paths [internal/mount/isolate_deps.go:62-72] — fixed: added `volumePrefix` param to `scanDir`, bmad_repos use `repos/<basename>` prefix
+- [x] [Review][Patch] `filepath.Rel` error silently discarded in `scanDir` — `rel, _ := filepath.Rel(sourcePath, dir)` drops the error; could produce incorrect volume names if paths are malformed [internal/mount/isolate_deps.go:73] — fixed: error now checked and returned
+- [x] [Review][Patch] Two separate import declarations in `config.go` — `import "slices"` and `import "encoding/json"` should be a single grouped import block [internal/config/config.go:3-5] — fixed: merged into single import block
+- [x] [Review][Defer] No traversal depth limit or skip list for non-productive directories — `filepath.WalkDir` recurses without limits and doesn't skip `.git`, `vendor`, `.cache`, `dist`; performance concern for large mount sources [internal/mount/isolate_deps.go:59] — deferred, performance optimization
 
 ## Dev Notes
 
@@ -365,13 +372,18 @@ Claude Opus 4.6 (1M context)
 - Integrated into `cmd/run.go` — scan runs after `AssembleMounts()`, logs summary and per-mount details, appends volume flags and sets env var
 - 8 unit tests covering: disabled config, single root package.json, monorepo with 3 package.json files, no package.json, node_modules exclusion, volume naming with dashed paths, volume flag format, and empty results
 - All tests pass (8/8), full regression suite green, go vet clean
+- Rework (2026-04-10): Refactored ScanDeps() to extract `scanDir()` helper, added bmad_repos iteration using `/workspace/repos/<basename>` container target convention
+- 5 new tests for bmad_repos: single repo root, monorepo nested, combined mounts+bmad_repos, no package.json, volume naming
+- Updated scan summary log in cmd/run.go: mountCount = len(cfg.Mounts) + len(cfg.BmadRepos)
+- All tests pass (13/13 in mount package), full regression suite green, go vet clean
 
 ### File List
 
-- `internal/mount/isolate_deps.go` (new) — ScanResult type, ScanDeps(), AssembleIsolateDeps(), buildVolumeName(), buildContainerPath()
-- `internal/mount/isolate_deps_test.go` (new) — 8 unit tests for ScanDeps and AssembleIsolateDeps
-- `cmd/run.go` (modified) — auto_isolate_deps integration after mount assembly
+- `internal/mount/isolate_deps.go` (modified) — refactored ScanDeps() to use scanDir() helper, added bmad_repos iteration
+- `internal/mount/isolate_deps_test.go` (modified) — added 5 bmad_repos tests (13 total)
+- `cmd/run.go` (modified) — mountCount now includes len(cfg.BmadRepos)
 
 ### Change Log
 
 - 2026-04-09: Implemented story 6-1 — auto dependency isolation via named volumes. Added ScanDeps/AssembleIsolateDeps functions, integrated into run command, 8 unit tests all passing.
+- 2026-04-10: Rework — extended ScanDeps() to scan bmad_repos paths with /workspace/repos/<basename> convention. Refactored to scanDir() helper. Added 5 bmad_repos tests. Updated scan summary log to include bmad_repos count. 13 tests all passing.

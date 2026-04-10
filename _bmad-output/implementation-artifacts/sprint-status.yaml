@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: "2026-04-08"
-last_updated: "2026-04-10"  # code review completed
+last_updated: "2026-04-10"  # story 6-1 code review complete
 
 
 
@@ -81,7 +81,7 @@ development_status:
 
   # Epic 6: Developer Can Isolate Platform Dependencies Automatically
   epic-6: in-progress
-  6-1-auto-dependency-isolation-via-named-volumes: in-progress  # rework: extend scan to bmad_repos paths (sprint-change-proposal-2026-04-10)
+  6-1-auto-dependency-isolation-via-named-volumes: done
   epic-6-retrospective: optional
 
   # Epic 7: Developer Can Share Host Agent Authentication

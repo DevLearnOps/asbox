@@ -82,6 +82,10 @@
 - Multiple mounts to same container target can produce duplicate volume entries — two mounts with same Target and same relative package.json produce two ScanResults for the same container path; Docker uses last-one-wins. [internal/mount/isolate_deps.go:26-56]
 - `project_name` special chars amplified to volume names — pre-existing unsanitized explicit project_name (tracked in story 1-7 review) now also affects Docker named volume names, not just container names. [internal/mount/isolate_deps.go:61]
 
+## Deferred from: code review of story 6-1 rework (2026-04-10)
+
+- No traversal depth limit or skip list for non-productive directories — `filepath.WalkDir` recurses without limits and doesn't skip `.git`, `vendor`, `.cache`, `dist`, etc.; performance concern for large mount sources. [internal/mount/isolate_deps.go:59]
+
 ## Deferred from: code review of story 7-1 (2026-04-09)
 
 - Tests replicate RunE logic inline instead of exercising actual command handler — pragmatic trade-off since RunE calls `ensureBuild()`/`RunContainer()` which require mock infrastructure that doesn't exist. Future test refactoring should add command-level integration tests. [cmd/run_test.go:52-120]

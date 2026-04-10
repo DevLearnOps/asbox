@@ -20,45 +20,84 @@ type ScanResult struct {
 	ContainerPath string // e.g., "/workspace/packages/api/node_modules"
 }
 
-// ScanDeps walks each mount's source path for package.json files and returns
-// volume isolation targets. Returns nil, nil if AutoIsolateDeps is false.
+// ScanDeps walks each mount's source path and each bmad_repos path for
+// package.json files and returns volume isolation targets.
+// Returns nil, nil if AutoIsolateDeps is false.
 func ScanDeps(cfg *config.Config) ([]ScanResult, error) {
 	if !cfg.AutoIsolateDeps {
 		return nil, nil
 	}
 
 	var results []ScanResult
+
+	// Scan primary mounts
 	for _, m := range cfg.Mounts {
-		err := filepath.WalkDir(m.Source, func(path string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return nil // skip unreadable directories
-			}
-			// Skip node_modules subtrees entirely
-			if d.IsDir() && d.Name() == "node_modules" {
-				return filepath.SkipDir
-			}
-			// Only care about package.json files
-			if d.IsDir() || d.Name() != "package.json" {
-				return nil
-			}
-
-			dir := filepath.Dir(path)
-			rel, _ := filepath.Rel(m.Source, dir)
-
-			volumeName := buildVolumeName(cfg.ProjectName, rel)
-			containerPath := buildContainerPath(m.Target, rel)
-
-			results = append(results, ScanResult{
-				VolumeName:    volumeName,
-				ContainerPath: containerPath,
-			})
-			return nil
-		})
+		found, err := scanDir(m.Source, m.Target, cfg.ProjectName, "")
 		if err != nil {
 			return nil, fmt.Errorf("auto_isolate_deps: failed to scan %s: %w", m.Source, err)
 		}
+		results = append(results, found...)
 	}
+
+	// Scan bmad_repos — container target is /workspace/repos/<basename>
+	for _, repoPath := range cfg.BmadRepos {
+		basename := filepath.Base(repoPath)
+		containerTarget := bmadRepoMountBase + "/" + basename
+		volumePrefix := "repos/" + basename
+		found, err := scanDir(repoPath, containerTarget, cfg.ProjectName, volumePrefix)
+		if err != nil {
+			return nil, fmt.Errorf("auto_isolate_deps: failed to scan bmad_repo %s: %w", repoPath, err)
+		}
+		results = append(results, found...)
+	}
+
 	return results, nil
+}
+
+// scanDir walks a directory for package.json files and returns ScanResults.
+// volumePrefix is prepended to the relative path for volume naming (e.g.,
+// "repos/frontend" for bmad_repos) to avoid name collisions across sources.
+func scanDir(sourcePath, containerTarget, projectName, volumePrefix string) ([]ScanResult, error) {
+	var results []ScanResult
+	err := filepath.WalkDir(sourcePath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil // skip unreadable directories
+		}
+		// Skip node_modules subtrees entirely
+		if d.IsDir() && d.Name() == "node_modules" {
+			return filepath.SkipDir
+		}
+		// Only care about package.json files
+		if d.IsDir() || d.Name() != "package.json" {
+			return nil
+		}
+
+		dir := filepath.Dir(path)
+		rel, relErr := filepath.Rel(sourcePath, dir)
+		if relErr != nil {
+			return fmt.Errorf("computing relative path for %s: %w", path, relErr)
+		}
+
+		// Prepend volumePrefix to distinguish sources in volume names
+		volRel := rel
+		if volumePrefix != "" {
+			if volRel == "" || volRel == "." {
+				volRel = volumePrefix
+			} else {
+				volRel = volumePrefix + "/" + volRel
+			}
+		}
+
+		volumeName := buildVolumeName(projectName, volRel)
+		containerPath := buildContainerPath(containerTarget, rel)
+
+		results = append(results, ScanResult{
+			VolumeName:    volumeName,
+			ContainerPath: containerPath,
+		})
+		return nil
+	})
+	return results, err
 }
 
 // buildVolumeName constructs a Docker named volume name from project name and relative path.

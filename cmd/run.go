@@ -77,7 +77,8 @@ var runCmd = &cobra.Command{
 				return err
 			}
 
-			fmt.Fprintf(cmd.OutOrStdout(), "auto_isolate_deps: scanned %d mount paths, found %d package.json files\n", len(cfg.Mounts), len(scanResults))
+			mountCount := len(cfg.Mounts) + len(cfg.BmadRepos)
+			fmt.Fprintf(cmd.OutOrStdout(), "auto_isolate_deps: scanned %d mount paths, found %d package.json files\n", mountCount, len(scanResults))
 
 			for _, r := range scanResults {
 				fmt.Fprintf(cmd.OutOrStdout(), "isolating: %s (volume: %s)\n", r.ContainerPath, r.VolumeName)

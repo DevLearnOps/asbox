@@ -1,8 +1,9 @@
 package config
 
-import "slices"
-
-import "encoding/json"
+import (
+	"encoding/json"
+	"slices"
+)
 
 // MCPServerEntry represents an MCP server in the manifest.
 type MCPServerEntry struct {
