@@ -45,6 +45,9 @@ var runCmd = &cobra.Command{
 		if len(bmadMounts) > 0 {
 			mountFlags = append(mountFlags, bmadMounts...)
 			fmt.Fprintf(cmd.OutOrStdout(), "bmad_repos: mounting %d repositories\n", len(bmadMounts))
+			for _, m := range bmadMounts {
+				fmt.Fprintf(cmd.OutOrStdout(), "bmad_repos: %s\n", m)
+			}
 		}
 		if instructionContent != "" {
 			tmpFile, err := os.CreateTemp("", "asbox-instructions-*.md")

@@ -301,7 +301,7 @@ func TestScanDeps_bmadRepoMonorepoNested(t *testing.T) {
 
 	base := filepath.Base(repoDir)
 	wantVolumes := map[string]string{
-		"asbox-myapp-repos-" + base + "-node_modules":              "/workspace/repos/" + base + "/node_modules",
+		"asbox-myapp-repos-" + base + "-node_modules":               "/workspace/repos/" + base + "/node_modules",
 		"asbox-myapp-repos-" + base + "-packages-core-node_modules": "/workspace/repos/" + base + "/packages/core/node_modules",
 		"asbox-myapp-repos-" + base + "-packages-web-node_modules":  "/workspace/repos/" + base + "/packages/web/node_modules",
 	}
