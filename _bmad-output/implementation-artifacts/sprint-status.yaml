@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: "2026-04-08"
-last_updated: "2026-04-10"  # story 9-1 review complete
+last_updated: "2026-04-10"  # story 9-2 done
 
 
 
@@ -97,7 +97,7 @@ development_status:
   # Epic 9: Integration Test Suite Validates All Use Cases
   epic-9: in-progress
   9-1-integration-test-infrastructure: done
-  9-2-lifecycle-and-mount-tests: backlog
+  9-2-lifecycle-and-mount-tests: done
   9-3-isolation-and-inner-container-tests: backlog
   9-4-mcp-auto-isolate-deps-and-bmad-repos-tests: backlog
   epic-9-retrospective: optional
