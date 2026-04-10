@@ -1,6 +1,6 @@
 # Story 5.1: MCP Server Installation at Build Time
 
-Status: review
+Status: done
 
 ## Story
 
@@ -38,6 +38,14 @@ So that the agent has browser automation and other MCP capabilities available im
   - [x] Test: Playwright browser install command in Dockerfile
   - [x] Test: Empty manifest when no MCP configured
   - [x] Test: Node.js dependency check for Playwright
+
+### Review Findings
+
+- [x] [Review][Decision] MCPManifestJSON hardcoded to playwright only — fixed: builds manifest dynamically from cfg.MCP via MCPServerRegistry + json.Marshal [internal/config/config.go]
+- [x] [Review][Patch] `hasMCP` template func duplicates `HasMCP` method — fixed: removed template func, use `.HasMCP` directly in template [internal/template/render.go, embed/Dockerfile.tmpl]
+- [x] [Review][Patch] Duplicate MCP entries silently accepted — fixed: added dedup check in parse.go validation [internal/config/parse.go]
+- [x] [Review][Patch] Error message "Supported: playwright" hardcoded separately from validMCPServers map — fixed: generated from MCPServerRegistry keys [internal/config/parse.go]
+- [x] [Review][Defer] Misleading error message prefix in render.go — both parse and FS-read failures use "failed to render Dockerfile" prefix. Pre-existing. [internal/template/render.go:15-17]
 
 ## Dev Notes
 

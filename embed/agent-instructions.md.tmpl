@@ -1,0 +1,42 @@
+# Sandbox Agent Instructions
+
+You are running inside an isolated development sandbox container.
+
+## Constraints
+
+- **No sudo escalation**: Do not attempt to use `sudo` for privileged operations beyond what is already configured.
+- **Git push is disabled**: The `git push` command is intercepted and blocked. All git operations except push work normally.
+- **Container runtime**: Podman is available with Docker compatibility (`docker` is aliased to `podman`). Use Podman for building and running inner containers.
+- **Docker Compose**: Available at `/usr/local/bin/docker-compose` and as a Docker CLI plugin (`docker compose`).
+
+## Available Tools
+
+- **Playwright**: Browser automation is available via MCP. Use `npx playwright` for browser testing.
+- **Inner containers**: Build and run containers using `podman build` / `podman run` or `docker build` / `docker run`.
+- **Development SDKs**: Check installed SDKs with standard version commands (`node --version`, `go version`, `python3 --version`).
+
+## Working Directory
+
+Your primary workspace is `/workspace`, which is mounted from the host project directory.
+{{- if .BmadRepos}}
+
+## Multi-Repo Workspace
+
+The following repositories are mounted for cross-repo development:
+
+{{range .BmadRepos}}- **{{.Name}}**: `{{.ContainerPath}}`
+{{end}}
+### Git Workflow for Repos
+
+- Each repository under `repos/` is an independent git working tree.
+- Commit changes in each repo independently using `cd {{range $i, $r := .BmadRepos}}{{if eq $i 0}}{{$r.ContainerPath}}{{end}}{{end}}` (or the appropriate repo path).
+- Git push is still blocked in all repositories — code review happens on the host.
+- Use relative paths from `/workspace` when referencing files across repos.
+{{- end}}
+
+## Best Practices
+
+- Commit changes frequently with descriptive messages.
+- Do not attempt to push — all code review happens on the host.
+- Use inner containers for service dependencies (databases, caches, etc.).
+- Run tests inside the sandbox to validate changes before signaling completion.

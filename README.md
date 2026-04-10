@@ -1,10 +1,10 @@
-# Sandbox
+# asbox
 
-Containerized development environment for AI coding agents. Sandbox gives Claude Code and Gemini CLI full development capability — git, Docker, SDKs, MCP servers — while isolating them from your host system. Assign a task, disconnect, and come back to working code.
+Containerized development environment for AI coding agents. asbox (Agent-SandBox) gives Claude Code and Gemini CLI full development capability — git, Docker, SDKs, MCP servers — while isolating them from your host system. Assign a task, disconnect, and come back to working code.
 
 ## Table of Contents
 
-- [Why Sandbox](#why-sandbox)
+- [Why asbox](#why-asbox)
 - [Prerequisites](#prerequisites)
 - [Quick Start](#quick-start)
 - [CLI Reference](#cli-reference)
@@ -16,9 +16,9 @@ Containerized development environment for AI coding agents. Sandbox gives Claude
 - [Project Structure](#project-structure)
 - [Exit Codes](#exit-codes)
 
-## Why Sandbox
+## Why asbox
 
-Without Sandbox, delegating multi-step tasks to AI agents requires constant supervision — permission prompts, approval gates, and risk of host contamination. Sandbox constrains the environment itself so the agent operates freely within safe boundaries:
+Without asbox, delegating multi-step tasks to AI agents requires constant supervision — permission prompts, approval gates, and risk of host contamination. asbox constrains the environment itself so the agent operates freely within safe boundaries:
 
 - **No permission prompts** — the agent runs with `--dangerously-skip-permissions` inside the container
 - **No host side effects** — only explicitly declared mounts, secrets, and env vars are accessible
@@ -29,61 +29,65 @@ Without Sandbox, delegating multi-step tasks to AI agents requires constant supe
 
 | Dependency | Minimum Version | Notes |
 |---|---|---|
-| Bash | 4.0+ | macOS ships 3.2 — run `brew install bash` |
-| Docker Engine or Podman | 20.10+ | Used to build and run the sandbox container |
-| yq | 4.0+ | YAML parser — install via `brew install yq` or [GitHub releases](https://github.com/mikefarah/yq) |
+| Docker Engine or Podman | 20.10+ | Used to build and run the asbox container |
 
-Sandbox validates all dependencies at startup and exits with code `3` if anything is missing or too old.
+asbox is a single Go binary with no other runtime dependencies. It validates Docker or Podman availability at startup and exits with code `3` if missing or too old.
 
 ## Quick Start
 
 ```bash
-# 1. Clone and make available on PATH
-git clone <repo-url> && ln -s "$(pwd)/sandbox.sh" /usr/local/bin/sandbox
+# 1. Install via go install
+go install github.com/mcastellin/asbox@latest
+
+# Or build from source
+git clone <repo-url> && cd asbox
+make install    # Installs to ~/.local/bin/asbox
 
 # 2. Navigate to your project and initialize
 cd ~/my-project
-sandbox init
+asbox init
 
-# 3. Edit .sandbox/config.yaml — set your agent, SDKs, secrets
+# 3. Edit .asbox/config.yaml — set your agent, SDKs, secrets
 
 # 4. Build and run
-sandbox run
+asbox run
 ```
 
-`sandbox run` auto-builds the image if one doesn't exist yet. You only need an explicit `sandbox build` when you want to pre-build or verify the image without launching a session.
+`asbox run` auto-builds the image if one doesn't exist yet. You only need an explicit `asbox build` when you want to pre-build or verify the image without launching a session.
 
 ## CLI Reference
 
 ```
-sandbox [command] [-f <config-path>]
+asbox [command] [-f <config-path>]
 ```
 
 ### Commands
 
-**`sandbox init`** — Generate a starter config file.
+**`asbox init`** — Generate a starter config file.
 
 ```bash
-sandbox init                           # Creates .sandbox/config.yaml
-sandbox init -f configs/gpu.yaml       # Creates config at custom path
+asbox init                           # Creates .asbox/config.yaml
+asbox init -f configs/gpu.yaml       # Creates config at custom path
 ```
 
 Fails with exit code `1` if the config file already exists.
 
-**`sandbox build`** — Build the container image from config.
+**`asbox build`** — Build the container image from config.
 
 ```bash
-sandbox build                          # Uses .sandbox/config.yaml
-sandbox build -f configs/gpu.yaml      # Uses custom config
+asbox build                          # Uses .asbox/config.yaml
+asbox build -f configs/gpu.yaml      # Uses custom config
+asbox build --no-cache               # Force full rebuild, bypass cache
 ```
 
-Generates a Dockerfile from `Dockerfile.template`, computes a content hash, and tags the image as `sandbox-<project>:<hash>`. Skips the build entirely if an image with the same hash already exists.
+Renders the Dockerfile template, computes a content hash, and tags the image as `asbox-<project>:<hash>`. Skips the build entirely if an image with the same hash already exists. Use `--no-cache` to force a complete rebuild, bypassing both the content-hash check and Docker layer cache.
 
-**`sandbox run`** — Launch an interactive sandbox session.
+**`asbox run`** — Launch an interactive sandbox session.
 
 ```bash
-sandbox run                            # Uses .sandbox/config.yaml
-sandbox run -f configs/gpu.yaml        # Uses custom config
+asbox run                            # Uses .asbox/config.yaml
+asbox run -f configs/gpu.yaml        # Uses custom config
+asbox run --no-cache                 # Force rebuild before running
 ```
 
 Validates that all declared secrets exist in your host environment, auto-builds if needed, then starts the container in TTY mode with the configured agent as the foreground process. Press `Ctrl+C` to stop cleanly — Tini handles signal forwarding with no orphaned processes.
@@ -92,14 +96,13 @@ Validates that all declared secrets exist in your host environment, auto-builds 
 
 | Flag | Description |
 |---|---|
-| `-f <path>` | Override config file path (default: `.sandbox/config.yaml`) |
-| `--help` | Display usage information |
-
-The `-f` flag works before or after the command: both `sandbox -f path run` and `sandbox run -f path` are valid.
+| `-f, --file <path>` | Override config file path (default: `.asbox/config.yaml`) |
+| `-h, --help` | Display usage information |
+| `-v, --version` | Display version |
 
 ## Configuration
 
-`sandbox init` generates `.sandbox/config.yaml` with sensible defaults and inline comments. Here is the full schema:
+`asbox init` generates `.asbox/config.yaml` with sensible defaults and inline comments. Here is the full schema:
 
 ```yaml
 # Required — which agent runs inside the sandbox
@@ -124,6 +127,9 @@ mounts:
   - source: "."                   # Relative to config file directory
     target: "/workspace"          # Absolute path inside container
 
+# Optional — auto-detect package.json and isolate node_modules via named volumes
+# auto_isolate_deps: true
+
 # Optional — host env vars to inject (names only, values read at runtime)
 secrets:
   - ANTHROPIC_API_KEY
@@ -136,12 +142,22 @@ env:
 # Optional — MCP servers to pre-install
 mcp:
   - playwright                    # Installs @playwright/mcp with browser deps
+
+# Optional — share host agent config (OAuth/SSO tokens)
+# host_agent_config:
+#   source: "~/.claude"
+#   target: "/opt/claude-config"
+
+# Optional — BMAD multi-repo mounts for cross-repo workflows
+# bmad_repos:
+#   - ../other-repo
+#   - ../shared-libs
 ```
 
 ### Key Behaviors
 
 - **Mount paths resolve relative to the config file**, not your working directory. This makes configs portable across machines.
-- **Secrets are names only** — values are never written to config, image, or build cache. Sandbox reads them from your host environment at `run` time and injects via `--env` flags.
+- **Secrets are names only** — values are never written to config, image, or build cache. asbox reads them from your host environment at `run` time and injects via `--env` flags.
 - **Env values must be single-line** — multiline YAML values break the key/value parser.
 - **Empty lists are valid** — omitting `sdks`, `packages`, or `secrets` entirely is fine.
 
@@ -153,7 +169,7 @@ The primary workflow. Mount your project, hand the agent a task, walk away.
 
 ```bash
 # Config: mount project root, inject API key
-sandbox run
+asbox run
 # Inside sandbox: agent has full git, Node.js, tests, etc.
 # Agent commits to local branch — you review the diff later
 ```
@@ -165,11 +181,11 @@ The agent works in a local git clone inside the container. All commits stay loca
 Maintain different configs for different workloads in the same project.
 
 ```bash
-sandbox init -f .sandbox/frontend.yaml    # Node.js + Playwright MCP
-sandbox init -f .sandbox/backend.yaml     # Python + Go, no MCP
-sandbox init -f .sandbox/full-stack.yaml  # Everything
+asbox init -f .asbox/frontend.yaml    # Node.js + Playwright MCP
+asbox init -f .asbox/backend.yaml     # Python + Go, no MCP
+asbox init -f .asbox/full-stack.yaml  # Everything
 
-sandbox run -f .sandbox/backend.yaml
+asbox run -f .asbox/backend.yaml
 ```
 
 Each config produces a separately cached image, so switching profiles doesn't trigger unnecessary rebuilds.
@@ -214,18 +230,18 @@ At container startup, the entrypoint generates `.mcp.json` in the workspace root
 
 ### Pattern 6: Team Onboarding
 
-Commit `.sandbox/config.yaml` to your repo. New team members get a working sandbox environment with one command.
+Commit `.asbox/config.yaml` to your repo. New team members get a working sandbox environment with one command.
 
 ```bash
 git clone <repo> && cd <repo>
-sandbox run    # Auto-builds from committed config
+asbox run    # Auto-builds from committed config
 ```
 
 The content-hash cache means everyone with the same config gets the same image, regardless of when they build.
 
 ## Isolation Model
 
-Sandbox protects against **accidental** agent mistakes (hallucinations, runaway commands), not deliberate adversarial behavior. The threat model assumes agents are well-intentioned but fallible.
+asbox protects against **accidental** agent mistakes (hallucinations, runaway commands), not deliberate adversarial behavior. The threat model assumes agents are well-intentioned but fallible.
 
 ### Boundaries
 
@@ -239,59 +255,68 @@ Sandbox protects against **accidental** agent mistakes (hallucinations, runaway 
 
 ### Tamper Resistance
 
-Isolation scripts (`git-wrapper.sh`, `entrypoint.sh`) are baked into the image owned by root. The non-root sandbox user cannot modify them at runtime.
+Isolation scripts (`git-wrapper.sh`, `entrypoint.sh`) are embedded in the Go binary at build time and baked into the image owned by root. The non-root sandbox user cannot modify them at runtime.
 
 ## Build Caching
 
-Sandbox computes a content hash from exactly four files:
+asbox computes a content hash from:
 
-1. `.sandbox/config.yaml` (or your `-f` path)
-2. `Dockerfile.template`
-3. `scripts/entrypoint.sh`
-4. `scripts/git-wrapper.sh`
+- `.asbox/config.yaml` (or your `-f` path)
+- The rendered Dockerfile (generated from the embedded template)
+- Embedded container scripts (entrypoint, git-wrapper, healthcheck-poller)
 
-Images are tagged `sandbox-<project>:<hash>`. If an image with that hash already exists, the build is skipped entirely. Changes to `sandbox.sh`, `README.md`, or `templates/` do **not** trigger rebuilds.
+Images are tagged `asbox-<project>:<hash>`. If an image with that hash already exists, the build is skipped entirely. Changes to the Go binary itself, README, or planning artifacts do **not** trigger rebuilds — only changes that affect the container image content matter.
+
+Use `asbox build --no-cache` or `asbox run --no-cache` to force a complete rebuild, bypassing both the content-hash check and Docker layer cache.
 
 The base image (Ubuntu 24.04 LTS) is pinned to a specific digest, ensuring identical builds regardless of when or where you build.
 
 ## Testing
 
-Run the test suite:
-
 ```bash
-bash tests/test_sandbox.sh
+# Run all tests (unit + integration)
+make test               # or: go test ./...
+
+# Unit tests only
+make test-unit          # or: go test -short ./...
+
+# Integration tests only (requires Docker)
+make test-integration   # or: go test -v ./integration/...
+
+# CI pipeline (vet + unit + integration)
+make test-ci
 ```
 
-Tests use a custom TAP-like runner with no external dependencies. The suite covers:
-
-- CLI help output and flag parsing
-- Dependency validation (Docker, yq, Bash version)
-- Error handling and exit codes
-- `sandbox init` config generation
-- Config parsing for all YAML fields
-- Build mock execution and caching behavior
-- Output stream correctness (stdout vs stderr)
-- Script quality (shebang, `set -euo pipefail`, no `eval`)
-- Filesystem and credential isolation verification
-- Git push blocking
-- Tamper resistance of isolation scripts
-
-Exit code `0` means all tests pass.
+Unit tests cover configuration parsing, template rendering, hash computation, and CLI flag handling. Integration tests use real containers to validate the full lifecycle: image build, container startup, mount isolation, git push blocking, inner container orchestration, MCP configuration, and dependency isolation.
 
 ## Project Structure
 
 ```
-sandbox.sh                  # CLI entry point (all commands)
-Dockerfile.template         # Template with conditional blocks and placeholders
-scripts/
-  entrypoint.sh             # Container startup (user switch, Podman init, agent exec)
-  git-wrapper.sh            # Git push interceptor
-templates/
-  config.yaml               # Starter config generated by `sandbox init`
-tests/
-  test_sandbox.sh           # Full test suite
-.sandbox/
-  config.yaml               # Your project-specific config (git-committed)
+asbox/
+├── main.go                     # Entry point
+├── go.mod / go.sum             # Module definition
+├── Makefile                    # Build targets (build, install, test, test-integration)
+├── cmd/                        # Cobra command definitions
+│   ├── root.go                 # Root command, global flags
+│   ├── init.go                 # asbox init
+│   ├── build.go                # asbox build
+│   └── run.go                  # asbox run
+├── internal/                   # Private application logic
+│   ├── config/                 # YAML parsing, validation, typed structs
+│   ├── template/               # Dockerfile template rendering + validation
+│   ├── docker/                 # Docker/Podman CLI interaction via os/exec
+│   ├── hash/                   # Content-hash computation for image caching
+│   └── mount/                  # Mount assembly, auto_isolate_deps, bmad_repos
+├── embed/                      # Embedded asset source files
+│   ├── Dockerfile.tmpl         # Go text/template Dockerfile
+│   ├── entrypoint.sh           # Container entrypoint
+│   ├── git-wrapper.sh          # Git push interceptor
+│   ├── healthcheck-poller.sh   # Healthcheck daemon
+│   ├── agent-instructions.md.tmpl  # Agent instruction template
+│   └── config.yaml             # Starter config for asbox init
+├── integration/                # Integration tests (Go testing + testcontainers-go)
+└── .asbox/
+    config.yaml                 # Your project-specific config
 ```
 
 ## Exit Codes
@@ -301,5 +326,5 @@ tests/
 | `0` | Success |
 | `1` | General error (missing config, invalid values) |
 | `2` | Usage error (unknown command, missing flag argument) |
-| `3` | Dependency error (missing Docker, yq, or Bash 4+) |
+| `3` | Dependency error (missing Docker) |
 | `4` | Secret validation error (declared secret not found in host env) |
