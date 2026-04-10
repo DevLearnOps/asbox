@@ -37,6 +37,39 @@ var runCmd = &cobra.Command{
 			envVars["CLAUDE_CONFIG_DIR"] = cfg.HostAgentConfig.Target
 		}
 
+		// Mount BMAD multi-repo directories and generate agent instructions
+		bmadMounts, instructionContent, err := mount.AssembleBmadRepos(cfg)
+		if err != nil {
+			return err
+		}
+		if len(bmadMounts) > 0 {
+			mountFlags = append(mountFlags, bmadMounts...)
+			fmt.Fprintf(cmd.OutOrStdout(), "bmad_repos: mounting %d repositories\n", len(bmadMounts))
+		}
+		if instructionContent != "" {
+			tmpFile, err := os.CreateTemp("", "asbox-instructions-*.md")
+			if err != nil {
+				return fmt.Errorf("bmad_repos: failed to create temp instruction file: %w", err)
+			}
+			defer os.Remove(tmpFile.Name())
+			if _, err := tmpFile.WriteString(instructionContent); err != nil {
+				tmpFile.Close()
+				return fmt.Errorf("bmad_repos: failed to write instruction file: %w", err)
+			}
+			tmpFile.Close()
+
+			var instructionTarget string
+			switch cfg.Agent {
+			case "claude-code":
+				instructionTarget = "/home/sandbox/CLAUDE.md"
+			case "gemini-cli":
+				instructionTarget = "/home/sandbox/GEMINI.md"
+			default:
+				return fmt.Errorf("bmad_repos: unsupported agent %q for instruction file mount", cfg.Agent)
+			}
+			mountFlags = append(mountFlags, tmpFile.Name()+":"+instructionTarget)
+		}
+
 		// Auto-isolate platform dependencies via named volumes
 		if cfg.AutoIsolateDeps {
 			scanResults, err := mount.ScanDeps(cfg)

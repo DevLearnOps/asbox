@@ -18,6 +18,21 @@ You are running inside an isolated development sandbox container.
 ## Working Directory
 
 Your primary workspace is `/workspace`, which is mounted from the host project directory.
+{{- if .BmadRepos}}
+
+## Multi-Repo Workspace
+
+The following repositories are mounted for cross-repo development:
+
+{{range .BmadRepos}}- **{{.Name}}**: `{{.ContainerPath}}`
+{{end}}
+### Git Workflow for Repos
+
+- Each repository under `repos/` is an independent git working tree.
+- Commit changes in each repo independently using `cd {{range $i, $r := .BmadRepos}}{{if eq $i 0}}{{$r.ContainerPath}}{{end}}{{end}}` (or the appropriate repo path).
+- Git push is still blocked in all repositories — code review happens on the host.
+- Use relative paths from `/workspace` when referencing files across repos.
+{{- end}}
 
 ## Best Practices
 

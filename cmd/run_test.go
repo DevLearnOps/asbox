@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/mcastellin/asbox/internal/config"
+	"github.com/mcastellin/asbox/internal/mount"
 )
 
 // writeRunConfig writes a config YAML file in a .asbox subdirectory and returns its path.
@@ -143,6 +145,99 @@ host_agent_config:
 
 	if _, ok := envVars["CLAUDE_CONFIG_DIR"]; ok {
 		t.Error("CLAUDE_CONFIG_DIR should not be set for gemini-cli agent")
+	}
+}
+
+func TestRun_bmadReposNonexistentPath_returnsConfigError(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := writeRunConfig(t, dir, `
+agent: claude-code
+bmad_repos:
+  - /nonexistent/bmad/repo
+`)
+
+	old := configFile
+	configFile = cfgPath
+	t.Cleanup(func() { configFile = old })
+
+	r := newRootCmd()
+	err := r.run("run")
+	if err == nil {
+		t.Fatal("expected error for nonexistent bmad_repos path, got nil")
+	}
+
+	var ce *config.ConfigError
+	if !errors.As(err, &ce) {
+		t.Fatalf("expected *config.ConfigError, got %T: %v", err, err)
+	}
+	if got := exitCode(err); got != 1 {
+		t.Errorf("exitCode = %d, want 1", got)
+	}
+}
+
+func TestRun_bmadReposConfigured_assembleBmadReposCalled(t *testing.T) {
+	dir := t.TempDir()
+	repoDir := filepath.Join(dir, "myrepo")
+	os.Mkdir(repoDir, 0o755)
+
+	cfgPath := writeRunConfig(t, dir, fmt.Sprintf(`
+agent: claude-code
+bmad_repos:
+  - %s
+`, repoDir))
+
+	// Parse and replicate the mount assembly logic from RunE
+	cfg, err := config.Parse(cfgPath)
+	if err != nil {
+		t.Fatalf("unexpected parse error: %v", err)
+	}
+
+	mountFlags, err := mount.AssembleMounts(cfg)
+	if err != nil {
+		t.Fatalf("unexpected mount error: %v", err)
+	}
+
+	bmadMounts, instructionContent, err := mount.AssembleBmadRepos(cfg)
+	if err != nil {
+		t.Fatalf("unexpected bmad error: %v", err)
+	}
+
+	if len(bmadMounts) != 1 {
+		t.Fatalf("len(bmadMounts) = %d, want 1", len(bmadMounts))
+	}
+	mountFlags = append(mountFlags, bmadMounts...)
+
+	if instructionContent == "" {
+		t.Error("expected non-empty instruction content when bmad_repos is configured")
+	}
+
+	// Verify mount flag is present
+	found := slices.Contains(mountFlags, repoDir+":/workspace/repos/myrepo")
+	if !found {
+		t.Errorf("expected bmad repo mount flag, got: %v", mountFlags)
+	}
+}
+
+func TestRun_bmadReposEmpty_noAdditionalMounts(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := writeRunConfig(t, dir, `
+agent: claude-code
+`)
+
+	cfg, err := config.Parse(cfgPath)
+	if err != nil {
+		t.Fatalf("unexpected parse error: %v", err)
+	}
+
+	bmadMounts, content, err := mount.AssembleBmadRepos(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if bmadMounts != nil {
+		t.Errorf("expected nil mounts when bmad_repos empty, got %v", bmadMounts)
+	}
+	if content != "" {
+		t.Errorf("expected empty content when bmad_repos empty, got %q", content)
 	}
 }
 

@@ -86,3 +86,9 @@
 
 - Tests replicate RunE logic inline instead of exercising actual command handler — pragmatic trade-off since RunE calls `ensureBuild()`/`RunContainer()` which require mock infrastructure that doesn't exist. Future test refactoring should add command-level integration tests. [cmd/run_test.go:52-120]
 - Error message hardcodes `.asbox/config.yaml` path — pre-existing pattern across all mount error messages. Config path may be overridden via CLI flag, making the hardcoded path misleading. [internal/mount/mount.go:42]
+
+## Deferred from: code review of story 8-1 (2026-04-10)
+
+- Mount flags lack `:ro` read-only qualifier — instruction file mount and repo mounts are read-write. Pre-existing pattern: no mounts in the codebase use `:ro`. [cmd/run.go:68]
+- Content hash implicitly includes bmad_repos config — `cmd/build_helper.go` hashes the entire raw config YAML, so runtime-only fields like `bmad_repos` trigger unnecessary rebuilds. Pre-existing hash granularity issue affecting all runtime-only config fields.
+- Cmd integration tests don't exercise full RunE success path — tests replicate RunE logic inline rather than running through `r.run("run")`. Pre-existing test pattern since tests would need to mock Docker. [cmd/run_test.go:177]
