@@ -101,3 +101,11 @@
 
 - `execInContainer` missing `tcexec.Multiplexed()` — returns raw Docker multiplexed stream with binary framing headers. Current callers tolerate it via `strings.Contains`, but exact string comparisons would fail. [integration/integration_test.go:108]
 - Cleanup closures in `startTestContainer` and `startTestContainerWithMounts` capture caller's `ctx` — if a future caller passes a cancellable context, `container.Terminate(ctx)` in `t.Cleanup` will fail silently. All current callers use `context.Background()`. [integration/integration_test.go:94,237]
+
+## Deferred from: code review of story 9-3 (2026-04-10)
+
+- AC #2 only checks sandbox user home, not root — `/root/.ssh` and `/root/.aws` are not verified absent inside the container. The sandbox user's home is the primary concern, but root paths are unchecked. [isolation_test.go:53-73]
+- AC #1 git push test has no remote configured — the git wrapper intercepts before remote evaluation so the test is behaviorally correct, but `setupGitRepoWithRemote` helper exists unused; the test is less realistic than the AC describes. [isolation_test.go:20]
+- `not_reachable_from_outside` subtest uses proxy check — inspects outer container's `NetworkSettings.Ports` for no bindings rather than attempting an actual connection from the host. Necessary but not sufficient condition. [inner_container_test.go:144-169]
+- `ls` locale-dependent error message in credential path tests — `strings.Contains(output, "No such file or directory")` is locale-dependent; exit code check alone would be more portable. [isolation_test.go:53-69]
+- FR36 private network bridge coverage is partial — DNS resolution test proves inter-service connectivity but doesn't assert network isolation from host or other outer containers. [inner_container_test.go:100-109]

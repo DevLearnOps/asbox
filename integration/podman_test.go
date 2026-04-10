@@ -175,6 +175,7 @@ func TestPodmanRunContainer(t *testing.T) {
 	image := buildTestImage(t)
 	container := startTestContainerWithEntrypoint(ctx, t, image)
 
+	// No t.Parallel: single subtest with sequential dependency on startTestContainerWithEntrypoint above.
 	t.Run("docker_run_alpine_echo", func(t *testing.T) {
 		// Run a container inside the sandbox using the docker (podman) alias
 		// This validates the full stack: podman-docker alias -> Podman socket -> rootless container execution

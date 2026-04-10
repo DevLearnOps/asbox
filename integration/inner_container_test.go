@@ -28,6 +28,7 @@ DEOF`})
 		t.Fatal("failed to create test Dockerfile inside container")
 	}
 
+	// Subtests are sequential (no t.Parallel): image_appears depends on build_succeeds completing first.
 	t.Run("build_succeeds", func(t *testing.T) {
 		output, exitCode := execAsUser(ctx, t, ctr, "sandbox", []string{
 			"sh", "-c", "cd /tmp/buildtest && docker build -t testapp .",
@@ -73,6 +74,7 @@ CEOF`})
 		t.Fatal("failed to create docker-compose.yml inside container")
 	}
 
+	// Subtests are sequential (no t.Parallel): service checks depend on compose_up completing first.
 	t.Run("compose_up_succeeds", func(t *testing.T) {
 		output, exitCode := execAsUser(ctx, t, ctr, "sandbox", []string{
 			"sh", "-c", "cd /tmp/composetest && docker compose up -d",
@@ -127,6 +129,7 @@ func TestInnerContainerPorts(t *testing.T) {
 		t.Fatal("failed to start inner container with port mapping")
 	}
 
+	// Subtests are sequential (no t.Parallel): reachability check depends on port container being started above.
 	t.Run("reachable_from_sandbox", func(t *testing.T) {
 		// Retry curl to allow server startup time
 		output, exitCode := execAsUser(ctx, t, ctr, "sandbox", []string{
