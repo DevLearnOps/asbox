@@ -4,7 +4,7 @@ set -euo pipefail
 
 run_healthchecks() {
     local containers
-    containers="$(podman ps --filter health=starting --filter health=healthy --format '{{.ID}}' 2>/dev/null || true)"
+    containers="$(podman ps --filter health=starting --filter health=healthy --filter health=unhealthy --format '{{.ID}}' 2>/dev/null || true)"
     for cid in ${containers}; do
         podman healthcheck run "${cid}" >/dev/null 2>&1 || true
     done

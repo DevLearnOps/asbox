@@ -84,7 +84,9 @@ merge_mcp_config() {
 }
 
 start_healthcheck_poller() {
-    /usr/local/bin/healthcheck-poller.sh &
+    # Must run as sandbox user so podman sees the rootless containers.
+    # Running as root would query root's (empty) container store.
+    gosu sandbox /usr/local/bin/healthcheck-poller.sh &
     HEALTHCHECK_PID=$!
     trap 'kill "${HEALTHCHECK_PID}" 2>/dev/null || true' EXIT
 }
@@ -141,7 +143,23 @@ start_podman_socket() {
     fi
 }
 
+unmask_proc() {
+    # Docker masks /proc sub-paths as read-only (e.g. /proc/sys) and overlays
+    # others with tmpfs. These masks prevent rootless Podman from mounting
+    # /proc inside nested containers and from writing sysctl tunables like
+    # /proc/sys/net/ipv4/ping_group_range. Unmounting the overlays restores
+    # full /proc access, which is safe because the sandbox already runs with
+    # SYS_ADMIN + seccomp=unconfined.
+    mount --make-rshared / 2>/dev/null || true
+    # The trailing || true guards against pipefail: grep returns 1 when
+    # there are no /proc submounts, which would exit the script.
+    grep ' /proc/' /proc/self/mountinfo | awk '{print $5}' | sort -r | while read -r mp; do
+        umount "$mp" 2>/dev/null || true
+    done || true
+}
+
 # Main entrypoint sequence
+unmask_proc
 align_uid_gid
 chown_volumes
 merge_mcp_config

@@ -13,9 +13,9 @@ func TestRunCmdArgs_basicFlags(t *testing.T) {
 	}
 	args := runCmdArgs(opts)
 
-	// Must start with "run -it --rm" followed by cap-add and security opts
-	if len(args) < 9 {
-		t.Fatalf("expected at least 9 args, got %d: %v", len(args), args)
+	// Must start with "run -it --rm" followed by cap-add, devices, and security opts
+	if len(args) < 15 {
+		t.Fatalf("expected at least 15 args, got %d: %v", len(args), args)
 	}
 	if args[0] != "run" || args[1] != "-it" || args[2] != "--rm" {
 		t.Errorf("expected [run -it --rm], got %v", args[:3])
@@ -30,6 +30,15 @@ func TestRunCmdArgs_basicFlags(t *testing.T) {
 	}
 	if !strings.Contains(joined, "--security-opt apparmor=unconfined") {
 		t.Errorf("expected --security-opt apparmor=unconfined in args: %v", args)
+	}
+	if !strings.Contains(joined, "--security-opt label=disable") {
+		t.Errorf("expected --security-opt label=disable in args: %v", args)
+	}
+	if !strings.Contains(joined, "--device /dev/net/tun") {
+		t.Errorf("expected --device /dev/net/tun in args: %v", args)
+	}
+	if !strings.Contains(joined, "--device /dev/fuse") {
+		t.Errorf("expected --device /dev/fuse in args: %v", args)
 	}
 
 	// Must end with image ref
@@ -153,8 +162,11 @@ func TestRunCmdArgs_fullOptions(t *testing.T) {
 	checks := []string{
 		"run", "-it", "--rm",
 		"--cap-add SYS_ADMIN",
+		"--device /dev/net/tun",
+		"--device /dev/fuse",
 		"--security-opt seccomp=unconfined",
 		"--security-opt apparmor=unconfined",
+		"--security-opt label=disable",
 		"--name asbox-myproject",
 		"-v /src:/workspace",
 		"asbox-myproject:a1b2c3",

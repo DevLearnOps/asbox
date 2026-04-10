@@ -22,8 +22,11 @@ type RunOptions struct {
 func runCmdArgs(opts RunOptions) []string {
 	args := []string{"run", "-it", "--rm",
 		"--cap-add", "SYS_ADMIN",
+		"--device", "/dev/net/tun",
+		"--device", "/dev/fuse",
 		"--security-opt", "seccomp=unconfined",
 		"--security-opt", "apparmor=unconfined",
+		"--security-opt", "label=disable",
 	}
 
 	if opts.ContainerName != "" {
