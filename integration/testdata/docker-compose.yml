@@ -1,0 +1,12 @@
+# Minimal two-service compose fixture for integration tests.
+# Used to verify docker compose works inside the sandbox.
+services:
+  web:
+    image: docker.io/library/alpine:3.20
+    command: ["tail", "-f", "/dev/null"]
+
+  client:
+    image: docker.io/library/alpine:3.20
+    command: ["tail", "-f", "/dev/null"]
+    depends_on:
+      - web

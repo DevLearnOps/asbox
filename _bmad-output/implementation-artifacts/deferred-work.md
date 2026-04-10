@@ -96,3 +96,8 @@
 - Mount flags lack `:ro` read-only qualifier — instruction file mount and repo mounts are read-write. Pre-existing pattern: no mounts in the codebase use `:ro`. [cmd/run.go:68]
 - Content hash implicitly includes bmad_repos config — `cmd/build_helper.go` hashes the entire raw config YAML, so runtime-only fields like `bmad_repos` trigger unnecessary rebuilds. Pre-existing hash granularity issue affecting all runtime-only config fields.
 - Cmd integration tests don't exercise full RunE success path — tests replicate RunE logic inline rather than running through `r.run("run")`. Pre-existing test pattern since tests would need to mock Docker. [cmd/run_test.go:177]
+
+## Deferred from: code review of story 9-1 (2026-04-10)
+
+- `execInContainer` missing `tcexec.Multiplexed()` — returns raw Docker multiplexed stream with binary framing headers. Current callers tolerate it via `strings.Contains`, but exact string comparisons would fail. [integration/integration_test.go:108]
+- Cleanup closures in `startTestContainer` and `startTestContainerWithMounts` capture caller's `ctx` — if a future caller passes a cancellable context, `container.Terminate(ctx)` in `t.Cleanup` will fail silently. All current callers use `context.Background()`. [integration/integration_test.go:94,237]
