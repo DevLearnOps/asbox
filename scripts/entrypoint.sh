@@ -36,12 +36,10 @@ if [[ "$(id -u)" == "0" ]]; then
       gid_changed=true
     fi
   fi
-  # Fix ownership of home dir contents after UID/GID change (excludes bind mounts outside /home)
-  if [[ "${uid_changed}" == "true" || "${gid_changed}" == "true" ]]; then
-    chown -R sandbox:sandbox /home/sandbox
-    # Fix Playwright browsers dir so MCP server and project installs can write to it
-    [[ -d /opt/playwright-browsers ]] && chown -R sandbox:sandbox /opt/playwright-browsers
-  fi
+  # Fix ownership of home dir and Playwright browsers (unconditional — root-built
+  # npm cache/global dirs and UID-mismatched browser files need fixing at every start)
+  chown -R sandbox:sandbox /home/sandbox
+  [[ -d /opt/playwright-browsers ]] && chown -R sandbox:sandbox /opt/playwright-browsers
 
   # Fix ownership of named-volume dependency mounts (created as root by Docker/Podman)
   if [[ -n "${ISOLATE_DEPS_TARGETS:-}" ]]; then

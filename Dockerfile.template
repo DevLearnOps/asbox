@@ -113,6 +113,9 @@ RUN chown -R sandbox:sandbox /opt/playwright-browsers && \
     chmod -R g+w /opt/playwright-browsers
 # {{/IF_MCP_PLAYWRIGHT}}
 
+# Fix npm cache/global dir ownership (root-level npm installs create root-owned files here)
+RUN chown -R sandbox:sandbox /home/sandbox/.npm /home/sandbox/.npm-global 2>/dev/null || true
+
 # {{IF_AGENT_CLAUDE}}
 ENV PATH="/home/sandbox/.local/bin:${PATH}"
 USER sandbox
