@@ -17,6 +17,7 @@ type BuildOptions struct {
 	RenderedDockerfile string
 	BuildArgs          []string
 	Tags               []string
+	NoCache            bool              // pass --no-cache to docker build
 	EmbeddedFiles      map[string][]byte // filename -> content for build context
 	Stdout             io.Writer
 	Stderr             io.Writer
@@ -53,6 +54,9 @@ func ImageExists(imageRef string) (bool, error) {
 // buildCmdArgs assembles the docker build command arguments (exported for testing).
 func buildCmdArgs(opts BuildOptions, dockerfilePath, contextDir string) []string {
 	args := []string{"build", "-f", dockerfilePath}
+	if opts.NoCache {
+		args = append(args, "--no-cache")
+	}
 	args = append(args, opts.BuildArgs...)
 	for _, tag := range opts.Tags {
 		args = append(args, "-t", tag)

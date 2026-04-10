@@ -242,7 +242,8 @@ asbox/
 - **Hash inputs:** rendered Dockerfile + all embedded scripts that get COPY'd into the image (entrypoint.sh, git-wrapper.sh, healthcheck-poller.sh) + base image digest + config.yaml content. Changes to the Go CLI source, README, or LICENSE do NOT trigger rebuilds.
 - **Rationale:** If any file that affects the container image changes, the hash changes and triggers a rebuild. Including the base image digest ensures that updating the pinned digest triggers a rebuild even if nothing else changed. Including embedded scripts ensures that changing git wrapper logic (for example) triggers a rebuild even though the Dockerfile template didn't change.
 - **Image tagging:** Primary tag `asbox-<project>:<hash>`. Additionally tag `asbox-<project>:latest` pointing to the most recent build for convenience (`docker image ls` friendliness, quick re-runs without knowing the hash).
-- **Affects:** `internal/hash/` (computation), `internal/docker/` (build + tag commands)
+- **Cache bypass (`--no-cache`):** When `--no-cache` is passed to `asbox build` or `asbox run`, two things happen: (1) the content-hash image existence check is skipped — `docker build` runs unconditionally, and (2) `--no-cache` is forwarded to the `docker build` command, forcing Docker to rebuild all layers from scratch. The resulting image is still tagged with the content hash and `latest` — cache bypass affects how the image is built, not how it's tagged.
+- **Affects:** `internal/hash/` (computation), `internal/docker/` (build + tag commands, `--no-cache` flag forwarding), `cmd/build.go` and `cmd/run.go` (flag definition and propagation)
 
 ### Automatic Dependency Isolation (`auto_isolate_deps`)
 

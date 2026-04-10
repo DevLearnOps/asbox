@@ -7,6 +7,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var noCache bool
+
 var buildCmd = &cobra.Command{
 	Use:   "build",
 	Short: "Build the sandbox container image",
@@ -16,7 +18,7 @@ var buildCmd = &cobra.Command{
 			return err
 		}
 
-		imageRef, built, err := ensureBuild(cfg, cmd)
+		imageRef, built, err := ensureBuild(cfg, cmd, noCache)
 		if err != nil {
 			return err
 		}
@@ -31,5 +33,6 @@ var buildCmd = &cobra.Command{
 }
 
 func init() {
+	buildCmd.Flags().BoolVar(&noCache, "no-cache", false, "Force a complete rebuild, bypassing content-hash check and Docker layer cache")
 	rootCmd.AddCommand(buildCmd)
 }

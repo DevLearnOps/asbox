@@ -13,8 +13,9 @@ import (
 )
 
 // ensureBuild computes the content hash and builds the image if it does not
-// already exist. It returns the image reference and whether a build was performed.
-func ensureBuild(cfg *config.Config, cmd *cobra.Command) (string, bool, error) {
+// already exist. When noCache is true, the hash existence check is skipped and
+// --no-cache is forwarded to docker build.
+func ensureBuild(cfg *config.Config, cmd *cobra.Command, noCache bool) (string, bool, error) {
 	rawConfig, err := os.ReadFile(configFile)
 	if err != nil {
 		return "", false, fmt.Errorf("failed to read config file: %w", err)
@@ -39,12 +40,14 @@ func ensureBuild(cfg *config.Config, cmd *cobra.Command) (string, bool, error) {
 	imageRef := fmt.Sprintf("asbox-%s:%s", cfg.ProjectName, contentHash)
 	latestRef := fmt.Sprintf("asbox-%s:latest", cfg.ProjectName)
 
-	exists, err := docker.ImageExists(imageRef)
-	if err != nil {
-		return "", false, err
-	}
-	if exists {
-		return imageRef, false, nil
+	if !noCache {
+		exists, err := docker.ImageExists(imageRef)
+		if err != nil {
+			return "", false, err
+		}
+		if exists {
+			return imageRef, false, nil
+		}
 	}
 
 	// Read all embedded files for build context
@@ -62,6 +65,7 @@ func ensureBuild(cfg *config.Config, cmd *cobra.Command) (string, bool, error) {
 		RenderedDockerfile: renderedDockerfile,
 		BuildArgs:          docker.BuildArgs(cfg),
 		Tags:               []string{imageRef, latestRef},
+		NoCache:            noCache,
 		EmbeddedFiles:      embeddedFiles,
 		Stdout:             cmd.OutOrStdout(),
 		Stderr:             cmd.ErrOrStderr(),

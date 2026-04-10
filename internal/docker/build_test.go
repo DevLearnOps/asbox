@@ -122,6 +122,17 @@ func TestBuildImage_commandAssembly(t *testing.T) {
 			},
 			want: []string{"--build-arg", "NODE_VERSION=22", "-t", "asbox-test:abc123"},
 		},
+		{
+			name: "with no-cache",
+			opts: BuildOptions{
+				RenderedDockerfile: "FROM ubuntu:24.04\n",
+				Tags:               []string{"asbox-test:abc123"},
+				NoCache:            true,
+				Stdout:             &bytes.Buffer{},
+				Stderr:             &bytes.Buffer{},
+			},
+			want: []string{"build", "--no-cache", "-t", "asbox-test:abc123"},
+		},
 	}
 
 	for _, tt := range tests {

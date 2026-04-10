@@ -101,7 +101,8 @@ var runCmd = &cobra.Command{
 		envVars["AGENT_CMD"] = agentCmd
 
 		// Build if needed (same hash logic as cmd/build.go)
-		imageRef, _, err := ensureBuild(cfg, cmd)
+		noCacheRun, _ := cmd.Flags().GetBool("no-cache")
+		imageRef, _, err := ensureBuild(cfg, cmd, noCacheRun)
 		if err != nil {
 			return err
 		}
@@ -165,5 +166,6 @@ func agentCommand(agent string) (string, error) {
 }
 
 func init() {
+	runCmd.Flags().Bool("no-cache", false, "Force a complete rebuild, bypassing content-hash check and Docker layer cache")
 	rootCmd.AddCommand(runCmd)
 }

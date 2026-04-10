@@ -204,6 +204,7 @@ N/A — asbox is a CLI tool with no GUI. No UX design document applicable.
 | FR52 | Epic 8 | Auto-mount repos to /workspace/repos/<name> |
 | FR53 | Epic 8 | Generated agent instruction file for repos |
 | FR54 | Epic 1 | Single statically-linked Go binary |
+| FR55 | Epic 1 | --no-cache flag for build command |
 
 ## Epic List
 
@@ -460,6 +461,14 @@ So that I get fast iteration without unnecessary rebuilds.
 **When** the error is returned
 **Then** the CLI prints the Docker error output to stderr and exits with code 1
 
+**Given** an image already exists with the current content hash
+**When** the developer runs `asbox build --no-cache`
+**Then** the hash existence check is skipped, `docker build` runs with `--no-cache`, and the image is rebuilt from scratch (FR55)
+
+**Given** the developer runs `asbox run --no-cache`
+**When** the image needs to be built or already exists
+**Then** `--no-cache` is forwarded to the build step, bypassing both the hash check and Docker layer cache
+
 **Implementation Notes:**
 - `internal/hash/hash.go` — `Compute(renderedDockerfile, scripts, configContent string) string` returning 12-char hex
 - `internal/docker/build.go` — `BuildImage()` via `os/exec`, `--build-arg` flags, `-t` for both tags
@@ -499,7 +508,7 @@ So that I can interact with the agent and cleanly stop it with Ctrl+C.
 **Then** the entrypoint skips UID modification
 
 **Implementation Notes:**
-- `cmd/run.go` — orchestrates: `config.Parse()` → build-if-needed (hash check) → mount assembly → secret validation → `docker.RunContainer()`
+- `cmd/run.go` — orchestrates: `config.Parse()` → build-if-needed (hash check, respects `--no-cache` flag) → mount assembly → secret validation → `docker.RunContainer()`
 - `internal/docker/run.go` — `RunContainer()` via `os/exec` with `-it`, `--init`, HOST_UID/HOST_GID as `--env`, agent command as container CMD
 - Passes current user UID/GID via `os.Getuid()` and `os.Getgid()`
 

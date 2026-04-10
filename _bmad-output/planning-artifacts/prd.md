@@ -22,6 +22,8 @@ workflowType: 'prd'
 lastEdited: '2026-04-10'
 editHistory:
   - date: '2026-04-10'
+    changes: 'Course correction: added --no-cache flag for build command. New FR55. Per sprint-change-proposal-2026-04-10-no-cache.md.'
+  - date: '2026-04-10'
     changes: 'Course correction: auto_isolate_deps now scans bmad_repos paths in addition to primary mounts. Modified FR9b, Additional Requirements auto_isolate_deps bullet, Runtime behavior auto_isolate_deps paragraph. Per sprint-change-proposal-2026-04-10.md.'
   - date: '2026-04-06'
     changes: 'Major course correction: rebrand sandbox → asbox (Agent-SandBox), rewrite from bash to Go CLI, single binary distribution with embedded assets, add bmad_repos multi-repo workflow support, add integration test coverage requirements. New FRs: FR50-FR54. Modified FRs: FR9, FR15, FR38, FR43, FR47. Modified NFRs: NFR8, NFR11. New NFR: NFR15. Per sprint-change-proposal-2026-04-06.md.'
@@ -513,6 +515,7 @@ All of the following are non-negotiable for MVP -- removing any one breaks the c
 - FR52: When `bmad_repos` is configured, the system automatically creates mount mappings for each repository into `/workspace/repos/<repo_name>` inside the sandbox container
 - FR53: When `bmad_repos` is configured, the system generates an agent configuration file (e.g., `CLAUDE.md`) instructing the agent that git operations and code changes should be executed within the relevant repositories under the `repos/` directory, and mounts it into the container
 - FR54: The system is distributed as a single statically-linked Go binary with no external runtime dependencies beyond Docker
+- FR55: Developer can pass `--no-cache` to `asbox build` (and implicitly to `asbox run`) to bypass the content-hash image existence check and pass `--no-cache` to the underlying Docker build, forcing a complete image rebuild with no cached layers
 
 ## Non-Functional Requirements
 
