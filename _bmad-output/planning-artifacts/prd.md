@@ -19,8 +19,10 @@ stepsCompleted:
   - step-e-03-edit
 inputDocuments: []
 workflowType: 'prd'
-lastEdited: '2026-04-06'
+lastEdited: '2026-04-10'
 editHistory:
+  - date: '2026-04-10'
+    changes: 'Course correction: auto_isolate_deps now scans bmad_repos paths in addition to primary mounts. Modified FR9b, Additional Requirements auto_isolate_deps bullet, Runtime behavior auto_isolate_deps paragraph. Per sprint-change-proposal-2026-04-10.md.'
   - date: '2026-04-06'
     changes: 'Major course correction: rebrand sandbox → asbox (Agent-SandBox), rewrite from bash to Go CLI, single binary distribution with embedded assets, add bmad_repos multi-repo workflow support, add integration test coverage requirements. New FRs: FR50-FR54. Modified FRs: FR9, FR15, FR38, FR43, FR47. Modified NFRs: NFR8, NFR11. New NFR: NFR15. Per sprint-change-proposal-2026-04-06.md.'
   - date: '2026-04-06'
@@ -329,7 +331,7 @@ When `auto_isolate_deps` is enabled, asbox scans all mounted project paths at la
 - Testcontainers compatibility: Ryuk disabled, socket override configured, localhost host override set
 - MCP manifest merge at runtime: build-time manifest merged with project `.mcp.json` if present; project config takes precedence on name conflicts
 - Private network bridge for inner container communication
-- When `auto_isolate_deps` is enabled: at launch, scan mounted paths for `package.json` files, derive `node_modules/` sibling paths, and create named Docker volume mounts (`-v asbox-<project>-<path>-node_modules:<container-path>/node_modules`) on the `docker run` invocation. Entrypoint fixes ownership of named volume mounts for the unprivileged sandbox user. Log each discovered mount. On fresh projects with no `package.json`, no mounts are added -- the agent creates Linux-native dependencies from scratch.
+- When `auto_isolate_deps` is enabled: at launch, scan all mounted paths — primary mounts and `bmad_repos` — for `package.json` files, derive `node_modules/` sibling paths, and create named Docker volume mounts (`-v asbox-<project>-<path>-node_modules:<container-path>/node_modules`) on the `docker run` invocation. For bmad_repos, container paths are derived from `/workspace/repos/<basename>`. Entrypoint fixes ownership of named volume mounts for the unprivileged sandbox user. Log each discovered mount. On fresh projects with no `package.json`, no mounts are added -- the agent creates Linux-native dependencies from scratch.
 - When `bmad_repos` is configured: each listed repository path is mounted into `/workspace/repos/<repo_name>` inside the container. An agent configuration file (e.g., `CLAUDE.md`) is generated from a Go template containing the list of mounted repositories and instructions for the agent to perform git operations and code changes within the `repos/` directory. This file is mounted into the container at the agent's expected configuration location.
 
 ### Installation & Distribution
@@ -349,7 +351,7 @@ When `auto_isolate_deps` is enabled, asbox scans all mounted project paths at la
 - Content-hash-based image caching over rendered template output + config content for smart rebuild detection
 - Mount path resolution relative to config file location, not working directory
 - Structured error types with clear messages for missing dependencies, unset secrets, and invalid configuration
-- `auto_isolate_deps` scan: `filepath.WalkDir` for `package.json` files under mounted paths, excluding `node_modules`; named volume flags assembled programmatically (`-v asbox-<project>-<path>-node_modules:<target>`). Entrypoint `chown`s named volume mounts for the unprivileged sandbox user
+- `auto_isolate_deps` scan: `filepath.WalkDir` for `package.json` files under primary mounts and `bmad_repos` paths, excluding `node_modules`; named volume flags assembled programmatically (`-v asbox-<project>-<path>-node_modules:<target>`). Entrypoint `chown`s named volume mounts for the unprivileged sandbox user
 - `bmad_repos` mount assembly: each repo path mounted to `/workspace/repos/<basename>`, agent instruction file generated via Go template and mounted into container
 - Image naming convention: `asbox-<project-name>:<content-hash>` for cache management (first 12 characters of SHA256)
 
@@ -445,7 +447,7 @@ All of the following are non-negotiable for MVP -- removing any one breaks the c
 - FR8: Developer can override the default config file path with a `-f` flag
 - FR9: Developer can generate a starter configuration file with sensible defaults via `asbox init`
 - FR9a: Developer can enable automatic dependency isolation (`auto_isolate_deps: true`) to create named Docker volume mounts over platform-specific dependency directories (e.g., `node_modules/`) within mounted project paths
-- FR9b: When `auto_isolate_deps` is enabled, the system scans mounted project paths at launch for `package.json` files and creates named Docker volumes (pattern: `asbox-<project>-<path>-node_modules`) for each corresponding `node_modules/` directory. Named volumes persist across sandbox restarts.
+- FR9b: When `auto_isolate_deps` is enabled, the system scans all mounted project paths at launch — including primary mounts and `bmad_repos` mounts — for `package.json` files and creates named Docker volumes (pattern: `asbox-<project>-<path>-node_modules`) for each corresponding `node_modules/` directory. Named volumes persist across sandbox restarts.
 - FR9c: The system logs all auto-detected dependency isolation mounts at launch so the developer has visibility into what was isolated
 - FR9d: Developer can configure a host agent configuration directory mount (`host_agent_config`) with source and target paths for OAuth token synchronization between host and sandbox
 - FR9e: Developer can optionally set `project_name` in configuration to override the default project identifier used for image and volume naming

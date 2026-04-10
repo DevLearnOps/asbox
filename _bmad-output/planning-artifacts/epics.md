@@ -767,9 +767,17 @@ So that macOS-compiled native modules don't crash inside the Linux sandbox.
 **When** the sandbox launches with `auto_isolate_deps: true`
 **Then** three named volume mounts are created with pattern `asbox-<project>-<path-dashed>-node_modules`
 
+**Given** `auto_isolate_deps: true` and `bmad_repos` configured with repos containing `package.json` files
+**When** the sandbox launches
+**Then** named volume mounts are also created for each `node_modules/` in the bmad_repos, using container paths under `/workspace/repos/<basename>/`
+
+**Given** `auto_isolate_deps: true` and `bmad_repos` with a monorepo containing nested `package.json` files
+**When** the sandbox launches
+**Then** all nested `node_modules/` directories within the bmad repo are isolated with named volumes
+
 **Given** `auto_isolate_deps` is enabled
 **When** the scan completes
-**Then** summary is logged: `"auto_isolate_deps: scanned N mount paths, found M package.json files"` — even if M is zero
+**Then** summary is logged: `"auto_isolate_deps: scanned N mount paths, found M package.json files"` — where N includes both primary mounts and bmad_repos, even if M is zero
 
 **Given** `auto_isolate_deps` is absent or `false`
 **When** the sandbox launches
@@ -780,11 +788,11 @@ So that macOS-compiled native modules don't crash inside the Linux sandbox.
 **Then** it `chown`s the volume mount directories for the unprivileged sandbox user
 
 **Implementation Notes:**
-- `internal/mount/isolate_deps.go` — `ScanDeps(cfg *config.Config) ([]string, error)` using `filepath.WalkDir`, excluding `node_modules/` subtrees
-- `internal/mount/isolate_deps_test.go` — table-driven tests with temp directories
+- `internal/mount/isolate_deps.go` — `ScanDeps(cfg *config.Config) ([]ScanResult, error)` using `filepath.WalkDir`, excluding `node_modules/` subtrees. Scans both `cfg.Mounts` (using mount target for container paths) and `cfg.BmadRepos` (using `/workspace/repos/<basename>` for container paths).
+- `internal/mount/isolate_deps_test.go` — table-driven tests with temp directories, including cases for bmad_repos paths
 - Volume naming: `asbox-<project_name>-<relative-path-with-dashes>-node_modules`
 - Called from `cmd/run.go` after config parse, before Docker run assembly
-- Volume chown in `embed/entrypoint.sh` (written in Story 1.5)
+- Volume chown in `embed/entrypoint.sh` (written in Story 1.5) — no changes needed, already handles all paths in `AUTO_ISOLATE_VOLUME_PATHS`
 
 ## Epic 7: Developer Can Share Host Agent Authentication
 

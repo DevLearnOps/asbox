@@ -251,8 +251,9 @@ asbox/
 
 **Detection Logic:**
 - Triggered only when `auto_isolate_deps: true` in config
-- For each mount: resolve host-side source path (relative to config file)
-- Walk directory tree for `package.json` files, excluding `node_modules/` subtrees
+- For each primary mount: resolve host-side source path (relative to config file)
+- For each `bmad_repos` entry: resolve host-side path and use its corresponding container target (`/workspace/repos/<basename>`)
+- Walk all resolved directory trees for `package.json` files, excluding `node_modules/` subtrees
 - For each discovered `package.json`: derive `node_modules` sibling path
 
 **Volume Assembly:**
@@ -265,7 +266,7 @@ asbox/
 - Each discovered mount logged: `"isolating: /workspace/node_modules (volume: asbox-myapp-node_modules)"`
 - If scan finds zero `package.json` files, the summary line still prints so the user can distinguish "scan ran, found nothing" from "scan didn't run"
 
-**Implementation:** `internal/mount/` package, called from `cmd/run.go` after config parse, before Docker run command assembly
+**Implementation:** `internal/mount/` package, called from `cmd/run.go` after config parse, before Docker run command assembly. `ScanDeps` accepts both primary mounts and `bmad_repos` entries as scan inputs. For bmad_repos, container paths are derived from the `/workspace/repos/<basename>` convention rather than from mount target config.
 - **Affects:** `internal/mount/` (scan + volume flag generation), `embed/entrypoint.sh` (chown)
 
 ### BMAD Multi-Repo Workflow (`bmad_repos`)

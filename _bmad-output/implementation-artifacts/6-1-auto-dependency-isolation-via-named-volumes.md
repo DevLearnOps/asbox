@@ -1,6 +1,6 @@
 # Story 6.1: Auto Dependency Isolation via Named Volumes
 
-Status: done
+Status: in-progress
 
 ## Story
 
@@ -14,11 +14,15 @@ So that macOS-compiled native modules don't crash inside the Linux sandbox.
 
 2. **Given** a monorepo with `package.json` at root, `packages/api/`, and `packages/web/`, **When** the sandbox launches with `auto_isolate_deps: true`, **Then** three named volume mounts are created with pattern `asbox-<project>-<path-dashed>-node_modules`.
 
-3. **Given** `auto_isolate_deps` is enabled, **When** the scan completes, **Then** summary is logged: `"auto_isolate_deps: scanned N mount paths, found M package.json files"` — even if M is zero.
+3. **Given** `auto_isolate_deps: true` and `bmad_repos` configured with repos containing `package.json` files, **When** the sandbox launches, **Then** named volume mounts are also created for each `node_modules/` in the bmad_repos, using container paths under `/workspace/repos/<basename>/`.
 
-4. **Given** `auto_isolate_deps` is absent or `false`, **When** the sandbox launches, **Then** no scanning occurs, zero overhead.
+4. **Given** `auto_isolate_deps: true` and `bmad_repos` with a monorepo containing nested `package.json` files, **When** the sandbox launches, **Then** all nested `node_modules/` directories within the bmad repo are isolated with named volumes.
 
-5. **Given** the container starts with named volume mounts, **When** the entrypoint runs, **Then** it `chown`s the volume mount directories for the unprivileged sandbox user.
+5. **Given** `auto_isolate_deps` is enabled, **When** the scan completes, **Then** summary is logged: `"auto_isolate_deps: scanned N mount paths, found M package.json files"` — where N includes both primary mounts and bmad_repos, even if M is zero.
+
+6. **Given** `auto_isolate_deps` is absent or `false`, **When** the sandbox launches, **Then** no scanning occurs, zero overhead.
+
+7. **Given** the container starts with named volume mounts, **When** the entrypoint runs, **Then** it `chown`s the volume mount directories for the unprivileged sandbox user.
 
 ## Tasks / Subtasks
 
@@ -49,6 +53,22 @@ So that macOS-compiled native modules don't crash inside the Linux sandbox.
   - [x] Test: volume flags match expected `-v` format
   - [x] Test: `AUTO_ISOLATE_VOLUME_PATHS` is comma-separated container paths
   - [x] Test: empty scan results return empty flags and empty paths string
+
+### Rework: Extend scan to bmad_repos (sprint-change-proposal-2026-04-10)
+
+- [ ] Task 6: Extend `ScanDeps()` to scan `cfg.BmadRepos` paths (AC: #3, #4, #5)
+  - [ ] After iterating `cfg.Mounts`, iterate `cfg.BmadRepos` entries
+  - [ ] For each bmad repo: use host path as walk root, derive container target from `/workspace/repos/<basename>` convention (not from mount target config)
+  - [ ] Reuse existing `buildVolumeName()` and `buildContainerPath()` — container path base is `/workspace/repos/<basename>` instead of `m.Target`
+  - [ ] Include bmad_repos count in the scan summary log (N = primary mounts + bmad repos)
+- [ ] Task 7: Unit tests for bmad_repos scanning in `internal/mount/isolate_deps_test.go` (AC: #3, #4, #5)
+  - [ ] Test: single bmad repo with root `package.json` → volume mount with container path under `/workspace/repos/<basename>/node_modules`
+  - [ ] Test: bmad repo with nested `package.json` files (monorepo) → multiple volume mounts with correct paths
+  - [ ] Test: combined config with primary mounts AND bmad_repos → all `package.json` files discovered across both
+  - [ ] Test: bmad_repos with no `package.json` → included in scan count N but contributes 0 to M
+  - [ ] Test: volume naming for bmad repos uses project name and path relative to repo root
+- [ ] Task 8: Update scan summary log in `cmd/run.go` (AC: #5)
+  - [ ] Mount count N must include both `len(cfg.Mounts)` and `len(cfg.BmadRepos)`
 
 ### Review Findings
 
@@ -82,11 +102,21 @@ The relative path is computed from the mount source root to the directory contai
 ### Container-Side Target Derivation
 
 The container-side mount target for each volume is derived from:
+
+**For primary mounts:**
 1. The mount's `Target` (e.g., `/workspace`)
 2. The relative path from mount `Source` to the `package.json` directory
 3. Appending `/node_modules`
 
 Example: mount `Source=/Users/me/project`, `Target=/workspace`, `package.json` at `Source/packages/api/package.json` → container target `/workspace/packages/api/node_modules`.
+
+**For bmad_repos:**
+1. The convention-based target `/workspace/repos/<basename>` (where `<basename>` is the directory name of the repo path)
+2. The relative path from the repo root to the `package.json` directory
+3. Appending `/node_modules`
+
+Example: bmad_repo `/Users/me/repos/frontend`, `package.json` at root → container target `/workspace/repos/frontend/node_modules`.
+Example: bmad_repo `/Users/me/repos/api`, `package.json` at `packages/core/package.json` → container target `/workspace/repos/api/packages/core/node_modules`.
 
 ### ScanDeps Implementation Approach
 
@@ -105,37 +135,57 @@ func ScanDeps(cfg *config.Config) ([]ScanResult, error) {
     }
 
     var results []ScanResult
+
+    // Scan primary mounts
     for _, m := range cfg.Mounts {
-        err := filepath.WalkDir(m.Source, func(path string, d fs.DirEntry, err error) error {
-            if err != nil {
-                return nil // skip unreadable directories
-            }
-            // Skip node_modules subtrees entirely
-            if d.IsDir() && d.Name() == "node_modules" {
-                return filepath.SkipDir
-            }
-            // Only care about package.json files
-            if d.IsDir() || d.Name() != "package.json" {
-                return nil
-            }
-
-            dir := filepath.Dir(path)
-            rel, _ := filepath.Rel(m.Source, dir)
-
-            volumeName := buildVolumeName(cfg.ProjectName, rel)
-            containerPath := buildContainerPath(m.Target, rel)
-
-            results = append(results, ScanResult{
-                VolumeName:    volumeName,
-                ContainerPath: containerPath,
-            })
-            return nil
-        })
+        found, err := scanDir(m.Source, m.Target, cfg.ProjectName)
         if err != nil {
             return nil, fmt.Errorf("auto_isolate_deps: failed to scan %s: %w", m.Source, err)
         }
+        results = append(results, found...)
     }
+
+    // Scan bmad_repos — container target is /workspace/repos/<basename>
+    for _, repoPath := range cfg.BmadRepos {
+        basename := filepath.Base(repoPath)
+        containerTarget := "/workspace/repos/" + basename
+        found, err := scanDir(repoPath, containerTarget, cfg.ProjectName)
+        if err != nil {
+            return nil, fmt.Errorf("auto_isolate_deps: failed to scan bmad_repo %s: %w", repoPath, err)
+        }
+        results = append(results, found...)
+    }
+
     return results, nil
+}
+
+// scanDir walks a directory for package.json files and returns ScanResults.
+func scanDir(sourcePath, containerTarget, projectName string) ([]ScanResult, error) {
+    var results []ScanResult
+    err := filepath.WalkDir(sourcePath, func(path string, d fs.DirEntry, err error) error {
+        if err != nil {
+            return nil // skip unreadable directories
+        }
+        if d.IsDir() && d.Name() == "node_modules" {
+            return filepath.SkipDir
+        }
+        if d.IsDir() || d.Name() != "package.json" {
+            return nil
+        }
+
+        dir := filepath.Dir(path)
+        rel, _ := filepath.Rel(sourcePath, dir)
+
+        volumeName := buildVolumeName(projectName, rel)
+        containerPath := buildContainerPath(containerTarget, rel)
+
+        results = append(results, ScanResult{
+            VolumeName:    volumeName,
+            ContainerPath: containerPath,
+        })
+        return nil
+    })
+    return results, err
 }
 ```
 
@@ -186,8 +236,8 @@ if cfg.AutoIsolateDeps {
         return err
     }
 
-    // Log scan summary (FR9c: always log when enabled)
-    mountCount := len(cfg.Mounts)
+    // Log scan summary (FR9c: always log when enabled, N = primary mounts + bmad repos)
+    mountCount := len(cfg.Mounts) + len(cfg.BmadRepos)
     fmt.Fprintf(cmd.OutOrStdout(), "auto_isolate_deps: scanned %d mount paths, found %d package.json files\n", mountCount, len(scanResults))
 
     for _, r := range scanResults {
@@ -285,16 +335,19 @@ Recent commits (10 stories) follow `feat: implement story X-Y description` forma
 
 ### References
 
-- [Source: _bmad-output/planning-artifacts/epics.md — Epic 6, Story 6.1 (lines 750-788)]
-- [Source: _bmad-output/planning-artifacts/architecture.md — Automatic Dependency Isolation section (lines 247-269)]
+- [Source: _bmad-output/planning-artifacts/epics.md — Epic 6, Story 6.1 (updated 2026-04-10 with bmad_repos criteria)]
+- [Source: _bmad-output/planning-artifacts/architecture.md — Automatic Dependency Isolation section (updated 2026-04-10)]
 - [Source: _bmad-output/planning-artifacts/architecture.md — File structure: internal/mount/ (lines 466-472)]
-- [Source: _bmad-output/planning-artifacts/prd.md — FR9a, FR9b, FR9c, FR16a (lines 447-462)]
-- [Source: internal/mount/mount.go — AssembleMounts() pattern (lines 1-32)]
-- [Source: internal/mount/mount_test.go — existing test patterns (lines 1-127)]
-- [Source: cmd/run.go — integration point after mount assembly (line 24)]
-- [Source: internal/docker/run.go — mount flags passed as -v (lines 37-39)]
-- [Source: embed/entrypoint.sh:45-58 — chown_volumes() already complete]
-- [Source: internal/config/config.go — AutoIsolateDeps bool field (line 31)]
+- [Source: _bmad-output/planning-artifacts/prd.md — FR9a, FR9b (updated 2026-04-10), FR9c, FR16a]
+- [Source: _bmad-output/planning-artifacts/sprint-change-proposal-2026-04-10.md — course correction for bmad_repos + auto_isolate_deps]
+- [Source: internal/mount/mount.go — AssembleMounts() pattern]
+- [Source: internal/mount/bmad_repos.go — AssembleBmadRepos() for container path convention]
+- [Source: internal/mount/isolate_deps.go — existing ScanDeps implementation to extend]
+- [Source: internal/mount/isolate_deps_test.go — existing tests to extend]
+- [Source: cmd/run.go — integration point after mount assembly]
+- [Source: internal/docker/run.go — mount flags passed as -v]
+- [Source: embed/entrypoint.sh:45-58 — chown_volumes() already complete, no changes needed]
+- [Source: internal/config/config.go — AutoIsolateDeps bool, BmadRepos []string fields]
 
 ## Dev Agent Record
 
