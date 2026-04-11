@@ -1,9 +1,14 @@
 # Sandbox Configuration
 # See: https://github.com/anthropics/sandbox for full documentation
 
-# AI agent to run inside the sandbox
-# Options: claude-code, gemini-cli
-agent: claude-code
+# Agents to install in the sandbox image
+# At least one agent is required
+installed_agents:
+  - claude
+  # - gemini
+
+# Default agent to launch (defaults to first in installed_agents if omitted)
+# default_agent: claude
 
 # SDK versions to install (comment out to skip)
 sdks:
@@ -46,19 +51,10 @@ env:
 # mcp:
 #   - playwright
 
-# Host agent config directory to mount into sandbox
-# Shares authentication and settings from host (supports OAuth/SSO)
-# WARNING: This is a read-write mount. The sandboxed agent can modify
-# your host config (settings, tokens, conversation history).
-# This is required for OAuth token refresh to stay synchronized.
-# Mount target should be OUTSIDE /home/sandbox to avoid chown conflicts.
-# The CLAUDE_CONFIG_DIR env var is set automatically for claude-code.
-# Defaults by agent:
-#   claude-code: source: "~/.claude", target: "/opt/claude-config"
-#   gemini-cli:  source: "~/.config/gemini", target: "/opt/gemini-config"
-# host_agent_config:
-#   source: "~/.claude"
-#   target: "/opt/claude-config"
+# Mount host agent config directory into sandbox for OAuth/SSO token sync
+# Automatically resolves paths per agent (claude: ~/.claude, gemini: ~/.gemini)
+# Set to false to disable
+# host_agent_config: false
 
 # BMAD multi-repo mounts for cross-repo workflows
 # Each entry is a path to a local repo that will be mounted into the sandbox

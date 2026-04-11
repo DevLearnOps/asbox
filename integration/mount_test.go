@@ -156,7 +156,7 @@ func TestSecrets_missingSecretExitsCode4(t *testing.T) {
 		}
 
 		// Create a minimal config that declares a secret
-		configContent := "agent: claude-code\nproject_name: test-secret-validation\nsecrets:\n  - ASBOX_TEST_NONEXISTENT_SECRET\n"
+		configContent := "installed_agents: [claude]\nproject_name: test-secret-validation\nsecrets:\n  - ASBOX_TEST_NONEXISTENT_SECRET\n"
 		configPath := filepath.Join(tmpDir, "config.yaml")
 		if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
 			t.Fatalf("writing config file: %v", err)

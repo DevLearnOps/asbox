@@ -113,3 +113,7 @@
 ## Deferred from: code review of story 10-1 (2026-04-10)
 
 - `go install github.com/mcastellin/asbox@latest` in README assumes the repo is published to that Go module path — instruction will fail until a version tag is pushed. Module path matches `go.mod` but no release exists yet. [README.md:42]
+
+## Deferred from: code review of 1-9-multi-agent-runtime-support (2026-04-11)
+
+- No cmd-level tests for `--agent` flag path — the `--agent` override wiring in `cmd/run.go` RunE is untested at command level. Unit validators are tested separately. Story 9-5 is explicitly planned to cover multi-agent config and flag tests. [cmd/run_test.go]

@@ -106,124 +106,6 @@ func TestAssembleMounts_emptyMountsList(t *testing.T) {
 	}
 }
 
-func TestAssembleMounts_hostAgentConfigValid(t *testing.T) {
-	dir := t.TempDir()
-
-	cfg := &config.Config{
-		HostAgentConfig: &config.MountConfig{Source: dir, Target: "/opt/claude-config"},
-	}
-
-	got, err := AssembleMounts(cfg)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(got) != 1 {
-		t.Fatalf("len = %d, want 1", len(got))
-	}
-	want := dir + ":/opt/claude-config"
-	if got[0] != want {
-		t.Errorf("got %q, want %q", got[0], want)
-	}
-}
-
-func TestAssembleMounts_hostAgentConfigNil(t *testing.T) {
-	cfg := &config.Config{}
-
-	got, err := AssembleMounts(cfg)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got != nil {
-		t.Errorf("got %v, want nil", got)
-	}
-}
-
-func TestAssembleMounts_hostAgentConfigSourceNotExist(t *testing.T) {
-	cfg := &config.Config{
-		HostAgentConfig: &config.MountConfig{Source: "/nonexistent/agent/config", Target: "/opt/claude-config"},
-	}
-
-	_, err := AssembleMounts(cfg)
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-
-	var ce *config.ConfigError
-	if !errors.As(err, &ce) {
-		t.Fatalf("expected *config.ConfigError, got %T: %v", err, err)
-	}
-}
-
-func TestAssembleMounts_hostAgentConfigSourceIsFile(t *testing.T) {
-	dir := t.TempDir()
-	file := filepath.Join(dir, "not-a-dir")
-	if err := os.WriteFile(file, []byte("data"), 0o644); err != nil {
-		t.Fatalf("failed to create test file: %v", err)
-	}
-
-	cfg := &config.Config{
-		HostAgentConfig: &config.MountConfig{Source: file, Target: "/opt/claude-config"},
-	}
-
-	_, err := AssembleMounts(cfg)
-	if err == nil {
-		t.Fatal("expected error for file source, got nil")
-	}
-
-	var ce *config.ConfigError
-	if !errors.As(err, &ce) {
-		t.Fatalf("expected *config.ConfigError, got %T: %v", err, err)
-	}
-	if got := err.Error(); got != "host_agent_config source '"+file+"' is not a directory. Check host_agent_config in .asbox/config.yaml" {
-		t.Errorf("unexpected error message: %s", got)
-	}
-}
-
-func TestAssembleMounts_hostAgentConfigWithRegularMounts(t *testing.T) {
-	dir1 := t.TempDir()
-	dir2 := t.TempDir()
-
-	cfg := &config.Config{
-		Mounts:          []config.MountConfig{{Source: dir1, Target: "/workspace"}},
-		HostAgentConfig: &config.MountConfig{Source: dir2, Target: "/opt/claude-config"},
-	}
-
-	got, err := AssembleMounts(cfg)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(got) != 2 {
-		t.Fatalf("len = %d, want 2", len(got))
-	}
-	if got[0] != dir1+":/workspace" {
-		t.Errorf("got[0] = %q, want %q", got[0], dir1+":/workspace")
-	}
-	if got[1] != dir2+":/opt/claude-config" {
-		t.Errorf("got[1] = %q, want %q", got[1], dir2+":/opt/claude-config")
-	}
-}
-
-func TestAssembleMounts_hostAgentConfigNoRegularMounts(t *testing.T) {
-	dir := t.TempDir()
-
-	cfg := &config.Config{
-		Mounts:          []config.MountConfig{},
-		HostAgentConfig: &config.MountConfig{Source: dir, Target: "/opt/claude-config"},
-	}
-
-	got, err := AssembleMounts(cfg)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(got) != 1 {
-		t.Fatalf("len = %d, want 1", len(got))
-	}
-	want := dir + ":/opt/claude-config"
-	if got[0] != want {
-		t.Errorf("got %q, want %q", got[0], want)
-	}
-}
-
 func TestAssembleMounts_failsOnFirstBadMount(t *testing.T) {
 	dir := t.TempDir()
 
@@ -242,5 +124,139 @@ func TestAssembleMounts_failsOnFirstBadMount(t *testing.T) {
 	var ce *config.ConfigError
 	if !errors.As(err, &ce) {
 		t.Fatalf("expected *config.ConfigError, got %T: %v", err, err)
+	}
+}
+
+// --- AssembleHostAgentConfig tests ---
+
+func TestAssembleHostAgentConfig_claudeWithExistingDir(t *testing.T) {
+	// Create a fake ~/.claude directory to test against
+	dir := t.TempDir()
+	claudeDir := filepath.Join(dir, ".claude")
+	if err := os.Mkdir(claudeDir, 0o755); err != nil {
+		t.Fatalf("failed to create test dir: %v", err)
+	}
+
+	// Temporarily override the registry source to use our test dir
+	origMapping := config.AgentConfigRegistry["claude"]
+	config.AgentConfigRegistry["claude"] = config.AgentConfigMapping{
+		Source: claudeDir,
+		Target: "/opt/claude-config",
+		EnvVar: "CLAUDE_CONFIG_DIR",
+		EnvVal: "/opt/claude-config",
+	}
+	t.Cleanup(func() { config.AgentConfigRegistry["claude"] = origMapping })
+
+	mountFlag, envKey, envVal, err := AssembleHostAgentConfig("claude", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if mountFlag != claudeDir+":/opt/claude-config" {
+		t.Errorf("mountFlag = %q, want %q", mountFlag, claudeDir+":/opt/claude-config")
+	}
+	if envKey != "CLAUDE_CONFIG_DIR" {
+		t.Errorf("envKey = %q, want %q", envKey, "CLAUDE_CONFIG_DIR")
+	}
+	if envVal != "/opt/claude-config" {
+		t.Errorf("envVal = %q, want %q", envVal, "/opt/claude-config")
+	}
+}
+
+func TestAssembleHostAgentConfig_disabledExplicitly(t *testing.T) {
+	disabled := false
+	mountFlag, envKey, envVal, err := AssembleHostAgentConfig("claude", &disabled)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if mountFlag != "" || envKey != "" || envVal != "" {
+		t.Errorf("expected empty results when disabled, got mount=%q env=%q val=%q", mountFlag, envKey, envVal)
+	}
+}
+
+func TestAssembleHostAgentConfig_enabledNil(t *testing.T) {
+	// When enabled is nil (default), should attempt mount if dir exists
+	dir := t.TempDir()
+	geminiDir := filepath.Join(dir, ".gemini")
+	if err := os.Mkdir(geminiDir, 0o755); err != nil {
+		t.Fatalf("failed to create test dir: %v", err)
+	}
+
+	origMapping := config.AgentConfigRegistry["gemini"]
+	config.AgentConfigRegistry["gemini"] = config.AgentConfigMapping{
+		Source: geminiDir,
+		Target: "/opt/gemini-home/.gemini",
+		EnvVar: "GEMINI_CLI_HOME",
+		EnvVal: "/opt/gemini-home",
+	}
+	t.Cleanup(func() { config.AgentConfigRegistry["gemini"] = origMapping })
+
+	mountFlag, envKey, envVal, err := AssembleHostAgentConfig("gemini", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if mountFlag != geminiDir+":/opt/gemini-home/.gemini" {
+		t.Errorf("mountFlag = %q, want %q", mountFlag, geminiDir+":/opt/gemini-home/.gemini")
+	}
+	if envKey != "GEMINI_CLI_HOME" {
+		t.Errorf("envKey = %q, want %q", envKey, "GEMINI_CLI_HOME")
+	}
+	if envVal != "/opt/gemini-home" {
+		t.Errorf("envVal = %q, want %q", envVal, "/opt/gemini-home")
+	}
+}
+
+func TestAssembleHostAgentConfig_missingDirSilentSkip(t *testing.T) {
+	// Point to a non-existent directory — should silently skip (AC9)
+	origMapping := config.AgentConfigRegistry["claude"]
+	config.AgentConfigRegistry["claude"] = config.AgentConfigMapping{
+		Source: "/nonexistent/dir/that/does/not/exist",
+		Target: "/opt/claude-config",
+		EnvVar: "CLAUDE_CONFIG_DIR",
+		EnvVal: "/opt/claude-config",
+	}
+	t.Cleanup(func() { config.AgentConfigRegistry["claude"] = origMapping })
+
+	mountFlag, envKey, envVal, err := AssembleHostAgentConfig("claude", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if mountFlag != "" || envKey != "" || envVal != "" {
+		t.Errorf("expected empty results for missing dir, got mount=%q env=%q val=%q", mountFlag, envKey, envVal)
+	}
+}
+
+func TestAssembleHostAgentConfig_unknownAgent(t *testing.T) {
+	mountFlag, envKey, envVal, err := AssembleHostAgentConfig("unknown-agent", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if mountFlag != "" || envKey != "" || envVal != "" {
+		t.Errorf("expected empty results for unknown agent, got mount=%q env=%q val=%q", mountFlag, envKey, envVal)
+	}
+}
+
+func TestAssembleHostAgentConfig_sourceIsFile(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "not-a-dir")
+	if err := os.WriteFile(file, []byte("data"), 0o644); err != nil {
+		t.Fatalf("failed to create test file: %v", err)
+	}
+
+	origMapping := config.AgentConfigRegistry["claude"]
+	config.AgentConfigRegistry["claude"] = config.AgentConfigMapping{
+		Source: file,
+		Target: "/opt/claude-config",
+		EnvVar: "CLAUDE_CONFIG_DIR",
+		EnvVal: "/opt/claude-config",
+	}
+	t.Cleanup(func() { config.AgentConfigRegistry["claude"] = origMapping })
+
+	mountFlag, envKey, envVal, err := AssembleHostAgentConfig("claude", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// File (not directory) should be silently skipped
+	if mountFlag != "" || envKey != "" || envVal != "" {
+		t.Errorf("expected empty results when source is a file, got mount=%q env=%q val=%q", mountFlag, envKey, envVal)
 	}
 }

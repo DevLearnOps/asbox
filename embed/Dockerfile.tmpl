@@ -74,7 +74,8 @@ RUN COMPOSE_VERSION=$(curl -fsSL https://api.github.com/repos/docker/compose/rel
     chmod +x /usr/local/bin/docker-compose && \
     mkdir -p /usr/local/lib/docker/cli-plugins && \
     ln -s /usr/local/bin/docker-compose /usr/local/lib/docker/cli-plugins/docker-compose
-{{- if eq .Agent "claude-code"}}
+{{- range .InstalledAgents}}
+{{- if eq . "claude"}}
 
 USER sandbox
 ENV HOME=/home/sandbox
@@ -82,20 +83,24 @@ RUN curl -fsSL https://claude.ai/install.sh | bash
 ENV PATH="/home/sandbox/.local/bin:${PATH}"
 USER root
 {{- end}}
-{{- if eq .Agent "gemini-cli"}}
+{{- if eq . "gemini"}}
 
 RUN npm install -g @google/gemini-cli && \
     chown -R sandbox:sandbox /home/sandbox/.npm-global
 {{- end}}
-{{- if .Agent}}
+{{- end}}
+{{- if .InstalledAgents}}
 
 COPY agent-instructions.md.tmpl /tmp/agent-instructions.md
-{{- if eq .Agent "claude-code"}}
-RUN mv /tmp/agent-instructions.md /home/sandbox/CLAUDE.md && chown sandbox:sandbox /home/sandbox/CLAUDE.md
+{{- range .InstalledAgents}}
+{{- if eq . "claude"}}
+RUN cp /tmp/agent-instructions.md /home/sandbox/CLAUDE.md && chown sandbox:sandbox /home/sandbox/CLAUDE.md
 {{- end}}
-{{- if eq .Agent "gemini-cli"}}
-RUN mv /tmp/agent-instructions.md /home/sandbox/GEMINI.md && chown sandbox:sandbox /home/sandbox/GEMINI.md
+{{- if eq . "gemini"}}
+RUN cp /tmp/agent-instructions.md /home/sandbox/GEMINI.md && chown sandbox:sandbox /home/sandbox/GEMINI.md
 {{- end}}
+{{- end}}
+RUN rm -f /tmp/agent-instructions.md
 {{- end}}
 {{- if .HasMCP "playwright"}}
 
@@ -109,6 +114,8 @@ RUN npm install -g @playwright/mcp && \
 
 RUN mkdir -p /etc/sandbox && echo '{{.MCPManifestJSON}}' > /etc/sandbox/mcp-servers.json
 
+ENV TERM=xterm-256color
+ENV COLORTERM=truecolor
 ENV TESTCONTAINERS_RYUK_DISABLED=true
 ENV TESTCONTAINERS_HOST_OVERRIDE=localhost
 {{- range $k, $v := .Env}}

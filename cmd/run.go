@@ -21,6 +21,18 @@ var runCmd = &cobra.Command{
 			return err
 		}
 
+		// Agent override via --agent flag
+		agentOverride, _ := cmd.Flags().GetString("agent")
+		if agentOverride != "" {
+			if err := config.ValidateAgent(agentOverride); err != nil {
+				return err
+			}
+			if err := config.ValidateAgentInstalled(agentOverride, cfg.InstalledAgents); err != nil {
+				return err
+			}
+			cfg.DefaultAgent = agentOverride
+		}
+
 		// Validate mounts and secrets before building (fail fast on config errors)
 		mountFlags, err := mount.AssembleMounts(cfg)
 		if err != nil {
@@ -32,9 +44,14 @@ var runCmd = &cobra.Command{
 			return err
 		}
 
-		// Mount host agent config directory (e.g. ~/.claude) for OAuth token sync
-		if cfg.HostAgentConfig != nil && cfg.Agent == "claude-code" {
-			envVars["CLAUDE_CONFIG_DIR"] = cfg.HostAgentConfig.Target
+		// Mount host agent config directory for OAuth token sync
+		hostMountFlag, envKey, envVal, err := mount.AssembleHostAgentConfig(cfg.DefaultAgent, cfg.HostAgentConfig)
+		if err != nil {
+			return err
+		}
+		if hostMountFlag != "" {
+			mountFlags = append(mountFlags, hostMountFlag)
+			envVars[envKey] = envVal
 		}
 
 		// Mount BMAD multi-repo directories and generate agent instructions
@@ -62,13 +79,13 @@ var runCmd = &cobra.Command{
 			tmpFile.Close()
 
 			var instructionTarget string
-			switch cfg.Agent {
-			case "claude-code":
+			switch cfg.DefaultAgent {
+			case "claude":
 				instructionTarget = "/home/sandbox/CLAUDE.md"
-			case "gemini-cli":
+			case "gemini":
 				instructionTarget = "/home/sandbox/GEMINI.md"
 			default:
-				return fmt.Errorf("bmad_repos: unsupported agent %q for instruction file mount", cfg.Agent)
+				return fmt.Errorf("bmad_repos: unsupported agent %q for instruction file mount", cfg.DefaultAgent)
 			}
 			mountFlags = append(mountFlags, tmpFile.Name()+":"+instructionTarget)
 		}
@@ -94,7 +111,7 @@ var runCmd = &cobra.Command{
 			}
 		}
 
-		agentCmd, err := agentCommand(cfg.Agent)
+		agentCmd, err := agentCommand(cfg.DefaultAgent)
 		if err != nil {
 			return err
 		}
@@ -156,16 +173,17 @@ func buildEnvVars(cfg *config.Config) (map[string]string, error) {
 // entrypoint should exec into.
 func agentCommand(agent string) (string, error) {
 	switch agent {
-	case "claude-code":
+	case "claude":
 		return "claude --dangerously-skip-permissions", nil
-	case "gemini-cli":
-		return "gemini", nil
+	case "gemini":
+		return "gemini -y", nil
 	default:
-		return "", fmt.Errorf("unknown agent %q: supported agents are claude-code, gemini-cli", agent)
+		return "", fmt.Errorf("unknown agent %q: supported agents are claude, gemini", agent)
 	}
 }
 
 func init() {
 	runCmd.Flags().Bool("no-cache", false, "Force a complete rebuild, bypassing content-hash check and Docker layer cache")
+	runCmd.Flags().String("agent", "", "Override default agent for this session (e.g., claude, gemini)")
 	rootCmd.AddCommand(runCmd)
 }

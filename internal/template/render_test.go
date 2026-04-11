@@ -9,7 +9,7 @@ import (
 )
 
 func TestRender_baseImage(t *testing.T) {
-	cfg := &config.Config{Agent: "claude-code"}
+	cfg := &config.Config{InstalledAgents: []string{"claude"}}
 	output, err := Render(cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -20,7 +20,7 @@ func TestRender_baseImage(t *testing.T) {
 }
 
 func TestRender_tiniInstalled(t *testing.T) {
-	cfg := &config.Config{Agent: "claude-code"}
+	cfg := &config.Config{InstalledAgents: []string{"claude"}}
 	output, err := Render(cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -31,7 +31,7 @@ func TestRender_tiniInstalled(t *testing.T) {
 }
 
 func TestRender_sandboxUserCreated(t *testing.T) {
-	cfg := &config.Config{Agent: "claude-code"}
+	cfg := &config.Config{InstalledAgents: []string{"claude"}}
 	output, err := Render(cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -45,7 +45,7 @@ func TestRender_sandboxUserCreated(t *testing.T) {
 }
 
 func TestRender_commonPackages(t *testing.T) {
-	cfg := &config.Config{Agent: "claude-code"}
+	cfg := &config.Config{InstalledAgents: []string{"claude"}}
 	output, err := Render(cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -59,7 +59,7 @@ func TestRender_commonPackages(t *testing.T) {
 }
 
 func TestRender_entrypoint(t *testing.T) {
-	cfg := &config.Config{Agent: "claude-code"}
+	cfg := &config.Config{InstalledAgents: []string{"claude"}}
 	output, err := Render(cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -72,8 +72,8 @@ func TestRender_entrypoint(t *testing.T) {
 
 func TestRender_envVars(t *testing.T) {
 	cfg := &config.Config{
-		Agent: "claude-code",
-		Env:   map[string]string{"MY_VAR": "value"},
+		InstalledAgents: []string{"claude"},
+		Env:             map[string]string{"MY_VAR": "value"},
 	}
 	output, err := Render(cfg)
 	if err != nil {
@@ -85,13 +85,15 @@ func TestRender_envVars(t *testing.T) {
 }
 
 func TestRender_noEnvVars(t *testing.T) {
-	cfg := &config.Config{Agent: "claude-code"}
+	cfg := &config.Config{InstalledAgents: []string{"claude"}}
 	output, err := Render(cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// Check there are no user-defined ENV directives (Testcontainers and PATH ENVs are expected)
 	knownEnvs := map[string]bool{
+		`ENV TERM=xterm-256color`:                          true,
+		`ENV COLORTERM=truecolor`:                          true,
 		`ENV TESTCONTAINERS_RYUK_DISABLED=true`:            true,
 		`ENV TESTCONTAINERS_HOST_OVERRIDE=localhost`:       true,
 		`ENV PATH="/usr/local/go/bin:${PATH}"`:             true,
@@ -109,7 +111,7 @@ func TestRender_noEnvVars(t *testing.T) {
 }
 
 func TestRender_copyScripts(t *testing.T) {
-	cfg := &config.Config{Agent: "claude-code"}
+	cfg := &config.Config{InstalledAgents: []string{"claude"}}
 	output, err := Render(cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -130,7 +132,7 @@ func TestRender_copyScripts(t *testing.T) {
 }
 
 func TestRender_minimalConfig(t *testing.T) {
-	cfg := &config.Config{Agent: "claude-code"}
+	cfg := &config.Config{InstalledAgents: []string{"claude"}}
 	output, err := Render(cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -142,9 +144,9 @@ func TestRender_minimalConfig(t *testing.T) {
 	if !strings.Contains(output, "ENTRYPOINT") {
 		t.Error("expected valid Dockerfile with ENTRYPOINT directive")
 	}
-	// USER sandbox is expected when agent is claude-code (install script runs as sandbox user)
+	// USER sandbox is expected when claude is installed (install script runs as sandbox user)
 	if !strings.Contains(output, "USER sandbox") {
-		t.Error("expected USER sandbox for claude-code agent install")
+		t.Error("expected USER sandbox for claude agent install")
 	}
 	if !strings.Contains(output, "WORKDIR /workspace") {
 		t.Error("expected valid Dockerfile with WORKDIR /workspace")
@@ -155,7 +157,7 @@ func TestRender_errorType(t *testing.T) {
 	// Verify that Render returns *TemplateError on failure.
 	// We cannot easily force a template execution error with a valid embedded template,
 	// so this test documents the error contract for valid input only.
-	cfg := &config.Config{Agent: "claude-code"}
+	cfg := &config.Config{InstalledAgents: []string{"claude"}}
 	_, err := Render(cfg)
 	if err != nil {
 		var tmplErr *TemplateError
@@ -167,8 +169,8 @@ func TestRender_errorType(t *testing.T) {
 
 func TestRender_nodejsOnly(t *testing.T) {
 	cfg := &config.Config{
-		Agent: "claude-code",
-		SDKs:  config.SDKConfig{NodeJS: "22"},
+		InstalledAgents: []string{"claude"},
+		SDKs:            config.SDKConfig{NodeJS: "22"},
 	}
 	output, err := Render(cfg)
 	if err != nil {
@@ -193,8 +195,8 @@ func TestRender_nodejsOnly(t *testing.T) {
 
 func TestRender_pythonOnly(t *testing.T) {
 	cfg := &config.Config{
-		Agent: "claude-code",
-		SDKs:  config.SDKConfig{Python: "3.12"},
+		InstalledAgents: []string{"claude"},
+		SDKs:            config.SDKConfig{Python: "3.12"},
 	}
 	output, err := Render(cfg)
 	if err != nil {
@@ -219,8 +221,8 @@ func TestRender_pythonOnly(t *testing.T) {
 
 func TestRender_goOnly(t *testing.T) {
 	cfg := &config.Config{
-		Agent: "claude-code",
-		SDKs:  config.SDKConfig{Go: "1.23"},
+		InstalledAgents: []string{"claude"},
+		SDKs:            config.SDKConfig{Go: "1.23"},
 	}
 	output, err := Render(cfg)
 	if err != nil {
@@ -245,8 +247,8 @@ func TestRender_goOnly(t *testing.T) {
 
 func TestRender_multipleSDKs(t *testing.T) {
 	cfg := &config.Config{
-		Agent: "claude-code",
-		SDKs:  config.SDKConfig{NodeJS: "22", Python: "3.12"},
+		InstalledAgents: []string{"claude"},
+		SDKs:            config.SDKConfig{NodeJS: "22", Python: "3.12"},
 	}
 	output, err := Render(cfg)
 	if err != nil {
@@ -265,8 +267,8 @@ func TestRender_multipleSDKs(t *testing.T) {
 
 func TestRender_allSDKs(t *testing.T) {
 	cfg := &config.Config{
-		Agent: "claude-code",
-		SDKs:  config.SDKConfig{NodeJS: "22", Go: "1.23", Python: "3.12"},
+		InstalledAgents: []string{"claude"},
+		SDKs:            config.SDKConfig{NodeJS: "22", Go: "1.23", Python: "3.12"},
 	}
 	output, err := Render(cfg)
 	if err != nil {
@@ -284,7 +286,7 @@ func TestRender_allSDKs(t *testing.T) {
 }
 
 func TestRender_noSDKs(t *testing.T) {
-	cfg := &config.Config{Agent: "claude-code"}
+	cfg := &config.Config{InstalledAgents: []string{"claude"}}
 	output, err := Render(cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -302,8 +304,8 @@ func TestRender_noSDKs(t *testing.T) {
 
 func TestRender_additionalPackages(t *testing.T) {
 	cfg := &config.Config{
-		Agent:    "claude-code",
-		Packages: []string{"libpq-dev", "redis-tools"},
+		InstalledAgents: []string{"claude"},
+		Packages:        []string{"libpq-dev", "redis-tools"},
 	}
 	output, err := Render(cfg)
 	if err != nil {
@@ -318,7 +320,7 @@ func TestRender_additionalPackages(t *testing.T) {
 }
 
 func TestRender_noPackages(t *testing.T) {
-	cfg := &config.Config{Agent: "claude-code"}
+	cfg := &config.Config{InstalledAgents: []string{"claude"}}
 	output, err := Render(cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -333,7 +335,7 @@ func TestRender_noPackages(t *testing.T) {
 }
 
 func TestRender_noBlankLinesWithoutSDKs(t *testing.T) {
-	cfg := &config.Config{Agent: "claude-code"}
+	cfg := &config.Config{InstalledAgents: []string{"claude"}}
 	output, err := Render(cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -365,7 +367,7 @@ func TestRender_noBlankLinesWithoutSDKs(t *testing.T) {
 }
 
 func TestRender_podmanInstalled(t *testing.T) {
-	cfg := &config.Config{Agent: "claude-code"}
+	cfg := &config.Config{InstalledAgents: []string{"claude"}}
 	output, err := Render(cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -379,7 +381,7 @@ func TestRender_podmanInstalled(t *testing.T) {
 }
 
 func TestRender_podmanConfig(t *testing.T) {
-	cfg := &config.Config{Agent: "claude-code"}
+	cfg := &config.Config{InstalledAgents: []string{"claude"}}
 	output, err := Render(cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -402,7 +404,7 @@ func TestRender_podmanConfig(t *testing.T) {
 }
 
 func TestRender_dockerCompose(t *testing.T) {
-	cfg := &config.Config{Agent: "claude-code"}
+	cfg := &config.Config{InstalledAgents: []string{"claude"}}
 	output, err := Render(cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -422,7 +424,7 @@ func TestRender_dockerCompose(t *testing.T) {
 }
 
 func TestRender_claudeCodeAgent(t *testing.T) {
-	cfg := &config.Config{Agent: "claude-code"}
+	cfg := &config.Config{InstalledAgents: []string{"claude"}}
 	output, err := Render(cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -431,12 +433,12 @@ func TestRender_claudeCodeAgent(t *testing.T) {
 		t.Error("expected Claude Code install script in output")
 	}
 	if strings.Contains(output, "npm install -g @google/gemini-cli") {
-		t.Error("expected no Gemini CLI install when agent is claude-code")
+		t.Error("expected no Gemini CLI install when only claude installed")
 	}
 }
 
 func TestRender_geminiAgent(t *testing.T) {
-	cfg := &config.Config{Agent: "gemini-cli"}
+	cfg := &config.Config{InstalledAgents: []string{"gemini"}}
 	output, err := Render(cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -444,13 +446,13 @@ func TestRender_geminiAgent(t *testing.T) {
 	if !strings.Contains(output, "npm install -g @google/gemini-cli") {
 		t.Error("expected Gemini CLI npm install in output")
 	}
-	if strings.Contains(output, "anthropic-sdk/claude-code/install.sh") {
-		t.Error("expected no Claude Code install when agent is gemini-cli")
+	if strings.Contains(output, "claude.ai/install.sh") {
+		t.Error("expected no Claude Code install when only gemini installed")
 	}
 }
 
 func TestRender_agentInstructions(t *testing.T) {
-	cfg := &config.Config{Agent: "claude-code"}
+	cfg := &config.Config{InstalledAgents: []string{"claude"}}
 	output, err := Render(cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -463,7 +465,7 @@ func TestRender_agentInstructions(t *testing.T) {
 	}
 
 	// Test gemini agent gets GEMINI.md
-	cfg2 := &config.Config{Agent: "gemini-cli"}
+	cfg2 := &config.Config{InstalledAgents: []string{"gemini"}}
 	output2, err := Render(cfg2)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -471,10 +473,23 @@ func TestRender_agentInstructions(t *testing.T) {
 	if !strings.Contains(output2, "/home/sandbox/GEMINI.md") {
 		t.Error("expected GEMINI.md in sandbox home directory for gemini agent")
 	}
+
+	// Test multi-agent gets both instruction files
+	cfg3 := &config.Config{InstalledAgents: []string{"claude", "gemini"}}
+	output3, err := Render(cfg3)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(output3, "/home/sandbox/CLAUDE.md") {
+		t.Error("expected CLAUDE.md for multi-agent config")
+	}
+	if !strings.Contains(output3, "/home/sandbox/GEMINI.md") {
+		t.Error("expected GEMINI.md for multi-agent config")
+	}
 }
 
 func TestRender_testcontainersEnv(t *testing.T) {
-	cfg := &config.Config{Agent: "claude-code"}
+	cfg := &config.Config{InstalledAgents: []string{"claude"}}
 	output, err := Render(cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -489,9 +504,9 @@ func TestRender_testcontainersEnv(t *testing.T) {
 
 func TestRender_mcpPlaywrightBlock(t *testing.T) {
 	cfg := &config.Config{
-		Agent: "claude-code",
-		SDKs:  config.SDKConfig{NodeJS: "22"},
-		MCP:   []string{"playwright"},
+		InstalledAgents: []string{"claude"},
+		SDKs:            config.SDKConfig{NodeJS: "22"},
+		MCP:             []string{"playwright"},
 	}
 	output, err := Render(cfg)
 	if err != nil {
@@ -516,7 +531,7 @@ func TestRender_mcpPlaywrightBlock(t *testing.T) {
 
 func TestRender_mcpManifestAlwaysPresent(t *testing.T) {
 	// Manifest should be present even without MCP
-	cfg := &config.Config{Agent: "claude-code"}
+	cfg := &config.Config{InstalledAgents: []string{"claude"}}
 	output, err := Render(cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -528,9 +543,9 @@ func TestRender_mcpManifestAlwaysPresent(t *testing.T) {
 
 func TestRender_mcpManifestContentWithPlaywright(t *testing.T) {
 	cfg := &config.Config{
-		Agent: "claude-code",
-		SDKs:  config.SDKConfig{NodeJS: "22"},
-		MCP:   []string{"playwright"},
+		InstalledAgents: []string{"claude"},
+		SDKs:            config.SDKConfig{NodeJS: "22"},
+		MCP:             []string{"playwright"},
 	}
 	output, err := Render(cfg)
 	if err != nil {
@@ -545,7 +560,7 @@ func TestRender_mcpManifestContentWithPlaywright(t *testing.T) {
 }
 
 func TestRender_mcpManifestContentEmpty(t *testing.T) {
-	cfg := &config.Config{Agent: "claude-code"}
+	cfg := &config.Config{InstalledAgents: []string{"claude"}}
 	output, err := Render(cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -557,8 +572,8 @@ func TestRender_mcpManifestContentEmpty(t *testing.T) {
 
 func TestRender_noPlaywrightWithoutMCP(t *testing.T) {
 	cfg := &config.Config{
-		Agent: "claude-code",
-		SDKs:  config.SDKConfig{NodeJS: "22"},
+		InstalledAgents: []string{"claude"},
+		SDKs:            config.SDKConfig{NodeJS: "22"},
 	}
 	output, err := Render(cfg)
 	if err != nil {
@@ -570,7 +585,7 @@ func TestRender_noPlaywrightWithoutMCP(t *testing.T) {
 }
 
 func TestRender_noBlankLinesWithoutTooling(t *testing.T) {
-	cfg := &config.Config{Agent: "claude-code"}
+	cfg := &config.Config{InstalledAgents: []string{"claude"}}
 	output, err := Render(cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -583,8 +598,8 @@ func TestRender_noBlankLinesWithoutTooling(t *testing.T) {
 
 func TestRender_goSDKMultiArch(t *testing.T) {
 	cfg := &config.Config{
-		Agent: "claude-code",
-		SDKs:  config.SDKConfig{Go: "1.23"},
+		InstalledAgents: []string{"claude"},
+		SDKs:            config.SDKConfig{Go: "1.23"},
 	}
 	output, err := Render(cfg)
 	if err != nil {

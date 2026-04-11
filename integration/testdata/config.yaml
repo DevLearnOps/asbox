@@ -1,4 +1,5 @@
 # Minimal .asbox/config.yaml fixture for integration tests.
 # Sufficient to render a buildable Dockerfile with no SDKs.
-agent: claude-code
+installed_agents:
+  - claude
 project_name: test-project

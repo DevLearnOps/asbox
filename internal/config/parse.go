@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -12,8 +13,8 @@ import (
 )
 
 var validAgents = map[string]bool{
-	"claude-code": true,
-	"gemini-cli":  true,
+	"claude": true,
+	"gemini": true,
 }
 
 var sanitizeRe = regexp.MustCompile(`[^a-z0-9-]+`)
@@ -40,18 +41,37 @@ func Parse(configPath string) (*Config, error) {
 		}
 	}
 
-	// Validate required field: agent
-	if cfg.Agent == "" {
+	// Validate installed_agents
+	if len(cfg.InstalledAgents) == 0 {
 		return nil, &ConfigError{
-			Field: "agent",
-			Msg:   "required field is empty. Set agent to 'claude-code' or 'gemini-cli'",
+			Field: "installed_agents",
+			Msg:   "required field is empty. Set installed_agents to a list of agents (e.g., [claude, gemini])",
 		}
 	}
-	if !validAgents[cfg.Agent] {
-		return nil, &ConfigError{
-			Field: "agent",
-			Msg:   fmt.Sprintf("unsupported agent '%s'. Use 'claude-code' or 'gemini-cli'", cfg.Agent),
+	seenAgents := map[string]bool{}
+	for _, agent := range cfg.InstalledAgents {
+		if err := ValidateAgent(agent); err != nil {
+			return nil, err
 		}
+		if seenAgents[agent] {
+			return nil, &ConfigError{
+				Field: "installed_agents",
+				Msg:   fmt.Sprintf("duplicate agent '%s'", agent),
+			}
+		}
+		seenAgents[agent] = true
+	}
+
+	// Validate or default default_agent
+	if cfg.DefaultAgent != "" {
+		if err := ValidateAgent(cfg.DefaultAgent); err != nil {
+			return nil, err
+		}
+		if err := ValidateAgentInstalled(cfg.DefaultAgent, cfg.InstalledAgents); err != nil {
+			return nil, err
+		}
+	} else {
+		cfg.DefaultAgent = cfg.InstalledAgents[0]
 	}
 
 	// Validate MCP servers
@@ -82,6 +102,12 @@ func Parse(configPath string) (*Config, error) {
 			Msg:   "mcp server 'playwright' requires sdks.nodejs to be configured",
 		}
 	}
+	if slices.Contains(cfg.InstalledAgents, "gemini") && cfg.SDKs.NodeJS == "" {
+		return nil, &ConfigError{
+			Field: "installed_agents",
+			Msg:   "agent 'gemini' requires sdks.nodejs to be configured",
+		}
+	}
 
 	// Validate mounts
 	for i, m := range cfg.Mounts {
@@ -101,28 +127,6 @@ func Parse(configPath string) (*Config, error) {
 			return nil, &ConfigError{
 				Field: fmt.Sprintf("mounts[%d].target", i),
 				Msg:   fmt.Sprintf("target must be an absolute container path, got %q", m.Target),
-			}
-		}
-	}
-
-	// Validate host_agent_config if set
-	if cfg.HostAgentConfig != nil {
-		if cfg.HostAgentConfig.Source == "" {
-			return nil, &ConfigError{
-				Field: "host_agent_config.source",
-				Msg:   "required field is empty. Set source path for host_agent_config",
-			}
-		}
-		if cfg.HostAgentConfig.Target == "" {
-			return nil, &ConfigError{
-				Field: "host_agent_config.target",
-				Msg:   "required field is empty. Set target path for host_agent_config",
-			}
-		}
-		if !filepath.IsAbs(cfg.HostAgentConfig.Target) {
-			return nil, &ConfigError{
-				Field: "host_agent_config.target",
-				Msg:   fmt.Sprintf("target must be an absolute container path, got %q", cfg.HostAgentConfig.Target),
 			}
 		}
 	}
@@ -150,11 +154,6 @@ func Parse(configPath string) (*Config, error) {
 		cfg.Mounts[i].Source = resolvePath(configDir, cfg.Mounts[i].Source)
 	}
 
-	// Resolve host_agent_config path
-	if cfg.HostAgentConfig != nil {
-		cfg.HostAgentConfig.Source = resolvePath(configDir, cfg.HostAgentConfig.Source)
-	}
-
 	// Resolve bmad_repos paths
 	for i := range cfg.BmadRepos {
 		cfg.BmadRepos[i] = resolvePath(configDir, cfg.BmadRepos[i])
@@ -175,6 +174,25 @@ func resolvePath(baseDir, p string) string {
 		return p
 	}
 	return filepath.Join(baseDir, p)
+}
+
+// ValidateAgent checks that an agent name is a supported short name.
+func ValidateAgent(agent string) error {
+	if !validAgents[agent] {
+		return &ConfigError{Field: "agent", Msg: fmt.Sprintf("unsupported agent '%s'. Use 'claude' or 'gemini'", agent)}
+	}
+	return nil
+}
+
+// ValidateAgentInstalled checks that an agent is in the installed agents list.
+func ValidateAgentInstalled(agent string, installed []string) error {
+	if !slices.Contains(installed, agent) {
+		return &ConfigError{
+			Field: "agent",
+			Msg:   fmt.Sprintf("agent '%s' is not installed in the image. Installed agents: %s. Add it to installed_agents in config or choose a different agent", agent, strings.Join(installed, ", ")),
+		}
+	}
+	return nil
 }
 
 // sanitizeProjectName lowercases and replaces non-alphanumeric chars with hyphens.

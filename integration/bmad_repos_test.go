@@ -38,7 +38,7 @@ func TestBmadRepos_mountsAndInstructions(t *testing.T) {
 
 		configDir := t.TempDir()
 		configPath := filepath.Join(configDir, "config.yaml")
-		configContent := fmt.Sprintf("agent: claude-code\nproject_name: test-bmad\nbmad_repos:\n  - %s\n  - %s\n", repo1, repo2)
+		configContent := fmt.Sprintf("installed_agents: [claude]\nproject_name: test-bmad\nbmad_repos:\n  - %s\n  - %s\n", repo1, repo2)
 		if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
 			t.Fatalf("writing config: %v", err)
 		}
@@ -70,7 +70,7 @@ func TestBmadRepos_mountsAndInstructions(t *testing.T) {
 
 		configDir := t.TempDir()
 		configPath := filepath.Join(configDir, "config.yaml")
-		configContent := fmt.Sprintf("agent: claude-code\nproject_name: test-bmad-mounts\nbmad_repos:\n  - %s\n  - %s\n", repo1, repo2)
+		configContent := fmt.Sprintf("installed_agents: [claude]\nproject_name: test-bmad-mounts\nbmad_repos:\n  - %s\n  - %s\n", repo1, repo2)
 		if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
 			t.Fatalf("writing config: %v", err)
 		}

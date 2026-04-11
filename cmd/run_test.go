@@ -29,7 +29,7 @@ func writeRunConfig(t *testing.T, dir, content string) string {
 func TestRun_nonexistentMountSource_returnsConfigError(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := writeRunConfig(t, dir, `
-agent: claude-code
+installed_agents: [claude]
 mounts:
   - source: ./nonexistent-dir
     target: /workspace
@@ -54,104 +54,10 @@ mounts:
 	}
 }
 
-func TestRun_hostAgentConfig_envVarSetWhenConfigured(t *testing.T) {
-	dir := t.TempDir()
-	agentDir := t.TempDir() // valid source for host_agent_config
-
-	cfgPath := writeRunConfig(t, dir, fmt.Sprintf(`
-agent: claude-code
-host_agent_config:
-  source: %s
-  target: /opt/claude-config
-`, agentDir))
-
-	old := configFile
-	configFile = cfgPath
-	t.Cleanup(func() { configFile = old })
-
-	// Parse config and replicate the env-building logic from RunE
-	cfg, err := config.Parse(cfgPath)
-	if err != nil {
-		t.Fatalf("unexpected parse error: %v", err)
-	}
-
-	envVars, err := buildEnvVars(cfg)
-	if err != nil {
-		t.Fatalf("unexpected buildEnvVars error: %v", err)
-	}
-
-	// CLAUDE_CONFIG_DIR is set after buildEnvVars, matching RunE flow (gated on agent type)
-	if cfg.HostAgentConfig != nil && cfg.Agent == "claude-code" {
-		envVars["CLAUDE_CONFIG_DIR"] = cfg.HostAgentConfig.Target
-	}
-
-	if envVars["CLAUDE_CONFIG_DIR"] != "/opt/claude-config" {
-		t.Errorf("CLAUDE_CONFIG_DIR = %q, want %q", envVars["CLAUDE_CONFIG_DIR"], "/opt/claude-config")
-	}
-}
-
-func TestRun_hostAgentConfig_envVarAbsentWhenNil(t *testing.T) {
-	dir := t.TempDir()
-
-	cfgPath := writeRunConfig(t, dir, `
-agent: claude-code
-`)
-
-	cfg, err := config.Parse(cfgPath)
-	if err != nil {
-		t.Fatalf("unexpected parse error: %v", err)
-	}
-
-	envVars, err := buildEnvVars(cfg)
-	if err != nil {
-		t.Fatalf("unexpected buildEnvVars error: %v", err)
-	}
-
-	// Same conditional as RunE — should NOT add CLAUDE_CONFIG_DIR
-	if cfg.HostAgentConfig != nil && cfg.Agent == "claude-code" {
-		envVars["CLAUDE_CONFIG_DIR"] = cfg.HostAgentConfig.Target
-	}
-
-	if _, ok := envVars["CLAUDE_CONFIG_DIR"]; ok {
-		t.Error("CLAUDE_CONFIG_DIR should not be set when HostAgentConfig is nil")
-	}
-}
-
-func TestRun_hostAgentConfig_envVarSkippedForNonClaudeAgent(t *testing.T) {
-	dir := t.TempDir()
-	agentDir := t.TempDir()
-
-	cfgPath := writeRunConfig(t, dir, fmt.Sprintf(`
-agent: gemini-cli
-host_agent_config:
-  source: %s
-  target: /opt/claude-config
-`, agentDir))
-
-	cfg, err := config.Parse(cfgPath)
-	if err != nil {
-		t.Fatalf("unexpected parse error: %v", err)
-	}
-
-	envVars, err := buildEnvVars(cfg)
-	if err != nil {
-		t.Fatalf("unexpected buildEnvVars error: %v", err)
-	}
-
-	// Same conditional as RunE — should NOT add CLAUDE_CONFIG_DIR for non-claude agents
-	if cfg.HostAgentConfig != nil && cfg.Agent == "claude-code" {
-		envVars["CLAUDE_CONFIG_DIR"] = cfg.HostAgentConfig.Target
-	}
-
-	if _, ok := envVars["CLAUDE_CONFIG_DIR"]; ok {
-		t.Error("CLAUDE_CONFIG_DIR should not be set for gemini-cli agent")
-	}
-}
-
 func TestRun_bmadReposNonexistentPath_returnsConfigError(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := writeRunConfig(t, dir, `
-agent: claude-code
+installed_agents: [claude]
 bmad_repos:
   - /nonexistent/bmad/repo
 `)
@@ -181,7 +87,7 @@ func TestRun_bmadReposConfigured_assembleBmadReposCalled(t *testing.T) {
 	os.Mkdir(repoDir, 0o755)
 
 	cfgPath := writeRunConfig(t, dir, fmt.Sprintf(`
-agent: claude-code
+installed_agents: [claude]
 bmad_repos:
   - %s
 `, repoDir))
@@ -221,7 +127,7 @@ bmad_repos:
 func TestRun_bmadReposEmpty_noAdditionalMounts(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := writeRunConfig(t, dir, `
-agent: claude-code
+installed_agents: [claude]
 `)
 
 	cfg, err := config.Parse(cfgPath)
@@ -244,7 +150,7 @@ agent: claude-code
 func TestRun_nonexistentMountSource_errorMessageFormat(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := writeRunConfig(t, dir, `
-agent: claude-code
+installed_agents: [claude]
 mounts:
   - source: ./does-not-exist
     target: /workspace
@@ -266,5 +172,44 @@ mounts:
 	want := "mount source '" + resolved + "' not found (resolved to " + resolved + "). Check mounts in .asbox/config.yaml"
 	if err.Error() != want {
 		t.Errorf("error = %q, want %q", err.Error(), want)
+	}
+}
+
+func TestAgentCommand_claude(t *testing.T) {
+	cmd, err := agentCommand("claude")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cmd != "claude --dangerously-skip-permissions" {
+		t.Errorf("agentCommand(claude) = %q, want %q", cmd, "claude --dangerously-skip-permissions")
+	}
+}
+
+func TestAgentCommand_gemini(t *testing.T) {
+	cmd, err := agentCommand("gemini")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cmd != "gemini -y" {
+		t.Errorf("agentCommand(gemini) = %q, want %q", cmd, "gemini -y")
+	}
+}
+
+func TestAgentCommand_unknown(t *testing.T) {
+	_, err := agentCommand("chatgpt")
+	if err == nil {
+		t.Fatal("expected error for unknown agent, got nil")
+	}
+}
+
+func TestAgentCommand_oldNameRejected(t *testing.T) {
+	_, err := agentCommand("claude-code")
+	if err == nil {
+		t.Fatal("expected error for old agent name, got nil")
+	}
+
+	_, err = agentCommand("gemini-cli")
+	if err == nil {
+		t.Fatal("expected error for old agent name, got nil")
 	}
 }

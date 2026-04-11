@@ -105,9 +105,9 @@ func TestAutoRebuild_differentConfigProducesDifferentTag(t *testing.T) {
 
 		// Build with modified config (adds curl package)
 		cfg := &config.Config{
-			Agent:       "claude-code",
-			ProjectName: "integration-test",
-			Packages:    []string{"curl"},
+			InstalledAgents: []string{"claude"},
+			ProjectName:     "integration-test",
+			Packages:        []string{"curl"},
 		}
 		tag2 := buildTestImageWithConfig(t, cfg)
 
@@ -121,8 +121,8 @@ func TestAutoRebuild_differentConfigProducesDifferentTag(t *testing.T) {
 
 		// Verify that different configs produce different Dockerfile content
 		defaultCfg := &config.Config{
-			Agent:       "claude-code",
-			ProjectName: "integration-test",
+			InstalledAgents: []string{"claude"},
+			ProjectName:     "integration-test",
 		}
 		rendered1, err := template.Render(defaultCfg)
 		if err != nil {

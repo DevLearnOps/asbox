@@ -27,8 +27,8 @@ func buildTestImage(t *testing.T) string {
 	t.Helper()
 
 	cfg := &config.Config{
-		Agent:       "claude-code",
-		ProjectName: "integration-test",
+		InstalledAgents: []string{"claude"},
+		ProjectName:     "integration-test",
 	}
 
 	rendered, err := template.Render(cfg)

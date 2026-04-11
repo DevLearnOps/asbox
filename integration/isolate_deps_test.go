@@ -35,7 +35,7 @@ func TestAutoIsolateDeps_logsVolumeCreation(t *testing.T) {
 		// Write config with auto_isolate_deps + mount pointing to projectDir
 		configDir := t.TempDir()
 		configPath := filepath.Join(configDir, "config.yaml")
-		configContent := fmt.Sprintf("agent: claude-code\nproject_name: test-isolate\nauto_isolate_deps: true\nmounts:\n  - source: %s\n    target: /workspace\n", projectDir)
+		configContent := fmt.Sprintf("installed_agents: [claude]\nproject_name: test-isolate\nauto_isolate_deps: true\nmounts:\n  - source: %s\n    target: /workspace\n", projectDir)
 		if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
 			t.Fatalf("writing config: %v", err)
 		}
@@ -76,7 +76,7 @@ func TestAutoIsolateDeps_logsVolumeCreation(t *testing.T) {
 
 		configDir := t.TempDir()
 		configPath := filepath.Join(configDir, "config.yaml")
-		configContent := fmt.Sprintf("agent: claude-code\nproject_name: test-mono\nauto_isolate_deps: true\nmounts:\n  - source: %s\n    target: /workspace\n", projectDir)
+		configContent := fmt.Sprintf("installed_agents: [claude]\nproject_name: test-mono\nauto_isolate_deps: true\nmounts:\n  - source: %s\n    target: /workspace\n", projectDir)
 		if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
 			t.Fatalf("writing config: %v", err)
 		}

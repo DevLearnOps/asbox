@@ -14,10 +14,10 @@ func TestMCP_manifestExistsWithPlaywrightEntry(t *testing.T) {
 	}
 
 	cfg := &config.Config{
-		Agent:       "claude-code",
-		ProjectName: "integration-test",
-		MCP:         []string{"playwright"},
-		SDKs:        config.SDKConfig{NodeJS: "20"},
+		InstalledAgents: []string{"claude"},
+		ProjectName:     "integration-test",
+		MCP:             []string{"playwright"},
+		SDKs:            config.SDKConfig{NodeJS: "20"},
 	}
 	image := buildTestImageWithConfig(t, cfg)
 	ctx := context.Background()

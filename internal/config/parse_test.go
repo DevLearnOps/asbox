@@ -20,7 +20,9 @@ func writeConfig(t *testing.T, dir, content string) string {
 func TestParse_validFullConfig(t *testing.T) {
 	dir := t.TempDir()
 	cfg := writeConfig(t, dir, `
-agent: claude-code
+installed_agents:
+  - claude
+default_agent: claude
 project_name: my-project
 sdks:
   nodejs: "20"
@@ -40,9 +42,7 @@ env:
   FOO: bar
   BAZ: qux
 auto_isolate_deps: true
-host_agent_config:
-  source: /home/user/.config/agent
-  target: /root/.config/agent
+host_agent_config: true
 bmad_repos:
   - /home/user/other-repo
 `)
@@ -52,8 +52,11 @@ bmad_repos:
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if parsed.Agent != "claude-code" {
-		t.Errorf("Agent = %q, want %q", parsed.Agent, "claude-code")
+	if len(parsed.InstalledAgents) != 1 || parsed.InstalledAgents[0] != "claude" {
+		t.Errorf("InstalledAgents = %v, want [claude]", parsed.InstalledAgents)
+	}
+	if parsed.DefaultAgent != "claude" {
+		t.Errorf("DefaultAgent = %q, want %q", parsed.DefaultAgent, "claude")
 	}
 	if parsed.ProjectName != "my-project" {
 		t.Errorf("ProjectName = %q, want %q", parsed.ProjectName, "my-project")
@@ -91,11 +94,8 @@ bmad_repos:
 	if !parsed.AutoIsolateDeps {
 		t.Error("AutoIsolateDeps = false, want true")
 	}
-	if parsed.HostAgentConfig == nil {
-		t.Fatal("HostAgentConfig is nil, want non-nil")
-	}
-	if parsed.HostAgentConfig.Source != "/home/user/.config/agent" {
-		t.Errorf("HostAgentConfig.Source = %q, want %q", parsed.HostAgentConfig.Source, "/home/user/.config/agent")
+	if parsed.HostAgentConfig == nil || !*parsed.HostAgentConfig {
+		t.Error("HostAgentConfig should be non-nil true")
 	}
 	if len(parsed.BmadRepos) != 1 || parsed.BmadRepos[0] != "/home/user/other-repo" {
 		t.Errorf("BmadRepos = %v, want [/home/user/other-repo]", parsed.BmadRepos)
@@ -104,15 +104,22 @@ bmad_repos:
 
 func TestParse_validMinimalConfig(t *testing.T) {
 	dir := t.TempDir()
-	cfg := writeConfig(t, dir, `agent: gemini-cli`)
+	cfg := writeConfig(t, dir, `
+installed_agents: [gemini]
+sdks:
+  nodejs: "22"
+`)
 
 	parsed, err := Parse(cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if parsed.Agent != "gemini-cli" {
-		t.Errorf("Agent = %q, want %q", parsed.Agent, "gemini-cli")
+	if len(parsed.InstalledAgents) != 1 || parsed.InstalledAgents[0] != "gemini" {
+		t.Errorf("InstalledAgents = %v, want [gemini]", parsed.InstalledAgents)
+	}
+	if parsed.DefaultAgent != "gemini" {
+		t.Errorf("DefaultAgent = %q, want %q (should default to first installed)", parsed.DefaultAgent, "gemini")
 	}
 	// project_name should be derived from parent dir
 	if parsed.ProjectName == "" {
@@ -129,6 +136,74 @@ func TestParse_validMinimalConfig(t *testing.T) {
 	}
 	if parsed.AutoIsolateDeps {
 		t.Error("AutoIsolateDeps = true, want false")
+	}
+}
+
+func TestParse_multiAgentConfig(t *testing.T) {
+	dir := t.TempDir()
+	cfg := writeConfig(t, dir, `
+installed_agents:
+  - claude
+  - gemini
+default_agent: gemini
+sdks:
+  nodejs: "22"
+`)
+
+	parsed, err := Parse(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(parsed.InstalledAgents) != 2 {
+		t.Fatalf("InstalledAgents length = %d, want 2", len(parsed.InstalledAgents))
+	}
+	if parsed.InstalledAgents[0] != "claude" || parsed.InstalledAgents[1] != "gemini" {
+		t.Errorf("InstalledAgents = %v, want [claude gemini]", parsed.InstalledAgents)
+	}
+	if parsed.DefaultAgent != "gemini" {
+		t.Errorf("DefaultAgent = %q, want %q", parsed.DefaultAgent, "gemini")
+	}
+}
+
+func TestParse_defaultAgentDefaultsToFirst(t *testing.T) {
+	dir := t.TempDir()
+	cfg := writeConfig(t, dir, `
+installed_agents:
+  - gemini
+  - claude
+sdks:
+  nodejs: "22"
+`)
+
+	parsed, err := Parse(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if parsed.DefaultAgent != "gemini" {
+		t.Errorf("DefaultAgent = %q, want %q (first in installed_agents)", parsed.DefaultAgent, "gemini")
+	}
+}
+
+func TestParse_defaultAgentNotInstalled(t *testing.T) {
+	dir := t.TempDir()
+	cfg := writeConfig(t, dir, `
+installed_agents: [claude]
+default_agent: gemini
+`)
+
+	_, err := Parse(cfg)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	var ce *ConfigError
+	if !errors.As(err, &ce) {
+		t.Fatalf("expected *ConfigError, got %T: %v", err, err)
+	}
+	if ce.Field != "agent" {
+		t.Errorf("Field = %q, want %q", ce.Field, "agent")
 	}
 }
 
@@ -169,9 +244,45 @@ func TestParse_invalidYAML(t *testing.T) {
 	}
 }
 
-func TestParse_emptyAgent(t *testing.T) {
+func TestParse_emptyInstalledAgents(t *testing.T) {
 	dir := t.TempDir()
-	cfg := writeConfig(t, dir, `agent: ""`)
+	cfg := writeConfig(t, dir, `installed_agents: []`)
+
+	_, err := Parse(cfg)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	var ce *ConfigError
+	if !errors.As(err, &ce) {
+		t.Fatalf("expected *ConfigError, got %T: %v", err, err)
+	}
+	if ce.Field != "installed_agents" {
+		t.Errorf("Field = %q, want %q", ce.Field, "installed_agents")
+	}
+}
+
+func TestParse_missingInstalledAgents(t *testing.T) {
+	dir := t.TempDir()
+	cfg := writeConfig(t, dir, `project_name: foo`)
+
+	_, err := Parse(cfg)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	var ce *ConfigError
+	if !errors.As(err, &ce) {
+		t.Fatalf("expected *ConfigError, got %T: %v", err, err)
+	}
+	if ce.Field != "installed_agents" {
+		t.Errorf("Field = %q, want %q", ce.Field, "installed_agents")
+	}
+}
+
+func TestParse_invalidAgentName(t *testing.T) {
+	dir := t.TempDir()
+	cfg := writeConfig(t, dir, `installed_agents: [chatgpt]`)
 
 	_, err := Parse(cfg)
 	if err == nil {
@@ -185,14 +296,14 @@ func TestParse_emptyAgent(t *testing.T) {
 	if ce.Field != "agent" {
 		t.Errorf("Field = %q, want %q", ce.Field, "agent")
 	}
-	if ce.Msg != "required field is empty. Set agent to 'claude-code' or 'gemini-cli'" {
+	if ce.Msg != "unsupported agent 'chatgpt'. Use 'claude' or 'gemini'" {
 		t.Errorf("Msg = %q", ce.Msg)
 	}
 }
 
-func TestParse_invalidAgent(t *testing.T) {
+func TestParse_oldAgentNameRejected(t *testing.T) {
 	dir := t.TempDir()
-	cfg := writeConfig(t, dir, `agent: chatgpt`)
+	cfg := writeConfig(t, dir, `installed_agents: [claude-code]`)
 
 	_, err := Parse(cfg)
 	if err == nil {
@@ -203,18 +314,76 @@ func TestParse_invalidAgent(t *testing.T) {
 	if !errors.As(err, &ce) {
 		t.Fatalf("expected *ConfigError, got %T: %v", err, err)
 	}
-	if ce.Field != "agent" {
-		t.Errorf("Field = %q, want %q", ce.Field, "agent")
-	}
-	if ce.Msg != "unsupported agent 'chatgpt'. Use 'claude-code' or 'gemini-cli'" {
+	if ce.Msg != "unsupported agent 'claude-code'. Use 'claude' or 'gemini'" {
 		t.Errorf("Msg = %q", ce.Msg)
+	}
+}
+
+func TestParse_duplicateInstalledAgent(t *testing.T) {
+	dir := t.TempDir()
+	cfg := writeConfig(t, dir, `installed_agents: [claude, claude]`)
+
+	_, err := Parse(cfg)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	var ce *ConfigError
+	if !errors.As(err, &ce) {
+		t.Fatalf("expected *ConfigError, got %T: %v", err, err)
+	}
+	if ce.Field != "installed_agents" {
+		t.Errorf("Field = %q, want %q", ce.Field, "installed_agents")
+	}
+	if ce.Msg != "duplicate agent 'claude'" {
+		t.Errorf("Msg = %q", ce.Msg)
+	}
+}
+
+func TestParse_geminiRequiresNodejs(t *testing.T) {
+	dir := t.TempDir()
+	cfg := writeConfig(t, dir, `installed_agents: [gemini]`)
+
+	_, err := Parse(cfg)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	var ce *ConfigError
+	if !errors.As(err, &ce) {
+		t.Fatalf("expected *ConfigError, got %T: %v", err, err)
+	}
+	if ce.Field != "installed_agents" {
+		t.Errorf("Field = %q, want %q", ce.Field, "installed_agents")
+	}
+	if ce.Msg != "agent 'gemini' requires sdks.nodejs to be configured" {
+		t.Errorf("Msg = %q", ce.Msg)
+	}
+}
+
+func TestParse_hostAgentConfigBoolean(t *testing.T) {
+	dir := t.TempDir()
+	cfg := writeConfig(t, dir, `
+installed_agents: [claude]
+host_agent_config: false
+`)
+
+	parsed, err := Parse(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if parsed.HostAgentConfig == nil {
+		t.Fatal("HostAgentConfig is nil, want non-nil false")
+	}
+	if *parsed.HostAgentConfig {
+		t.Error("HostAgentConfig = true, want false")
 	}
 }
 
 func TestParse_emptyMountSource(t *testing.T) {
 	dir := t.TempDir()
 	cfg := writeConfig(t, dir, `
-agent: claude-code
+installed_agents: [claude]
 mounts:
   - source: ""
     target: /workspace
@@ -237,7 +406,7 @@ mounts:
 func TestParse_emptyMountTarget(t *testing.T) {
 	dir := t.TempDir()
 	cfg := writeConfig(t, dir, `
-agent: claude-code
+installed_agents: [claude]
 mounts:
   - source: /host/src
     target: ""
@@ -265,7 +434,7 @@ func TestParse_projectNameDerivation(t *testing.T) {
 		t.Fatalf("failed to create dir: %v", err)
 	}
 	cfgPath := filepath.Join(projectDir, "config.yaml")
-	if err := os.WriteFile(cfgPath, []byte(`agent: claude-code`), 0644); err != nil {
+	if err := os.WriteFile(cfgPath, []byte(`installed_agents: [claude]`), 0644); err != nil {
 		t.Fatalf("failed to write config: %v", err)
 	}
 
@@ -287,7 +456,7 @@ func TestParse_projectNameSanitization(t *testing.T) {
 		t.Fatalf("failed to create dir: %v", err)
 	}
 	cfgPath := filepath.Join(projectDir, "config.yaml")
-	if err := os.WriteFile(cfgPath, []byte(`agent: claude-code`), 0644); err != nil {
+	if err := os.WriteFile(cfgPath, []byte(`installed_agents: [claude]`), 0644); err != nil {
 		t.Fatalf("failed to write config: %v", err)
 	}
 
@@ -304,7 +473,7 @@ func TestParse_projectNameSanitization(t *testing.T) {
 func TestParse_relativeMountPaths(t *testing.T) {
 	dir := t.TempDir()
 	cfg := writeConfig(t, dir, `
-agent: claude-code
+installed_agents: [claude]
 mounts:
   - source: "."
     target: /workspace
@@ -331,7 +500,7 @@ mounts:
 func TestParse_absoluteMountPaths(t *testing.T) {
 	dir := t.TempDir()
 	cfg := writeConfig(t, dir, `
-agent: claude-code
+installed_agents: [claude]
 mounts:
   - source: /absolute/path
     target: /workspace
@@ -350,7 +519,7 @@ mounts:
 func TestParse_relativeMountTarget_returnsError(t *testing.T) {
 	dir := t.TempDir()
 	cfg := writeConfig(t, dir, `
-agent: claude-code
+installed_agents: [claude]
 mounts:
   - source: /host/src
     target: workspace
@@ -373,7 +542,7 @@ mounts:
 func TestParse_tildeExpansion(t *testing.T) {
 	dir := t.TempDir()
 	cfg := writeConfig(t, dir, `
-agent: claude-code
+installed_agents: [claude]
 mounts:
   - source: "~/projects"
     target: /workspace
@@ -399,7 +568,7 @@ func TestParse_projectNameFallback(t *testing.T) {
 		t.Fatalf("failed to create dir: %v", err)
 	}
 	cfgPath := filepath.Join(projectDir, "config.yaml")
-	if err := os.WriteFile(cfgPath, []byte(`agent: claude-code`), 0644); err != nil {
+	if err := os.WriteFile(cfgPath, []byte(`installed_agents: [claude]`), 0644); err != nil {
 		t.Fatalf("failed to write config: %v", err)
 	}
 
@@ -416,7 +585,7 @@ func TestParse_projectNameFallback(t *testing.T) {
 func TestParse_mcpPlaywrightWithoutNodeJS(t *testing.T) {
 	dir := t.TempDir()
 	cfg := writeConfig(t, dir, `
-agent: claude-code
+installed_agents: [claude]
 mcp:
   - playwright
 `)
@@ -441,7 +610,7 @@ mcp:
 func TestParse_mcpPlaywrightWithNodeJS(t *testing.T) {
 	dir := t.TempDir()
 	cfg := writeConfig(t, dir, `
-agent: claude-code
+installed_agents: [claude]
 sdks:
   nodejs: "22"
 mcp:
@@ -460,7 +629,7 @@ mcp:
 func TestParse_mcpUnknownServer(t *testing.T) {
 	dir := t.TempDir()
 	cfg := writeConfig(t, dir, `
-agent: claude-code
+installed_agents: [claude]
 mcp:
   - unknown-server
 `)
@@ -485,7 +654,7 @@ mcp:
 func TestParse_mcpDuplicate(t *testing.T) {
 	dir := t.TempDir()
 	cfg := writeConfig(t, dir, `
-agent: claude-code
+installed_agents: [claude]
 sdks:
   nodejs: "22"
 mcp:
@@ -513,7 +682,7 @@ mcp:
 func TestParse_mcpEmptyList(t *testing.T) {
 	dir := t.TempDir()
 	cfg := writeConfig(t, dir, `
-agent: claude-code
+installed_agents: [claude]
 mcp: []
 `)
 
@@ -526,16 +695,17 @@ mcp: []
 	}
 }
 
-func TestParse_hostAgentConfigValidation(t *testing.T) {
-	dir := t.TempDir()
-	cfg := writeConfig(t, dir, `
-agent: claude-code
-host_agent_config:
-  source: ""
-  target: /root/.config
-`)
+func TestValidateAgent_valid(t *testing.T) {
+	if err := ValidateAgent("claude"); err != nil {
+		t.Errorf("unexpected error for claude: %v", err)
+	}
+	if err := ValidateAgent("gemini"); err != nil {
+		t.Errorf("unexpected error for gemini: %v", err)
+	}
+}
 
-	_, err := Parse(cfg)
+func TestValidateAgent_invalid(t *testing.T) {
+	err := ValidateAgent("claude-code")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -544,7 +714,28 @@ host_agent_config:
 	if !errors.As(err, &ce) {
 		t.Fatalf("expected *ConfigError, got %T: %v", err, err)
 	}
-	if ce.Field != "host_agent_config.source" {
-		t.Errorf("Field = %q, want %q", ce.Field, "host_agent_config.source")
+	if ce.Msg != "unsupported agent 'claude-code'. Use 'claude' or 'gemini'" {
+		t.Errorf("Msg = %q", ce.Msg)
+	}
+}
+
+func TestValidateAgentInstalled_installed(t *testing.T) {
+	if err := ValidateAgentInstalled("claude", []string{"claude", "gemini"}); err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateAgentInstalled_notInstalled(t *testing.T) {
+	err := ValidateAgentInstalled("gemini", []string{"claude"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	var ce *ConfigError
+	if !errors.As(err, &ce) {
+		t.Fatalf("expected *ConfigError, got %T: %v", err, err)
+	}
+	if ce.Msg != "agent 'gemini' is not installed in the image. Installed agents: claude. Add it to installed_agents in config or choose a different agent" {
+		t.Errorf("Msg = %q", ce.Msg)
 	}
 }
