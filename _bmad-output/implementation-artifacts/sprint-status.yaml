@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: "2026-04-08"
-last_updated: "2026-04-10"  # story 10-1 done
+last_updated: "2026-04-11"  # sprint change: multi-agent runtime support
 
 
 
@@ -55,6 +55,7 @@ development_status:
   1-6-image-build-with-content-hash-caching: done
   1-7-sandbox-run-with-tty-and-lifecycle: done
   1-8-configuration-initialization: done
+  1-9-multi-agent-runtime-support: backlog  # sprint change 2026-04-11: installed_agents, default_agent, --agent flag, short names, boolean host_agent_config
   epic-1-retrospective: optional
 
   # Epic 2: Agent Can Work With Project Files and Git
@@ -100,6 +101,7 @@ development_status:
   9-2-lifecycle-and-mount-tests: done
   9-3-isolation-and-inner-container-tests: done
   9-4-mcp-auto-isolate-deps-and-bmad-repos-tests: done
+  9-5-multi-agent-config-and-flag-tests: backlog  # sprint change 2026-04-11: tests for installed_agents, --agent override, host_agent_config boolean
   epic-9-retrospective: optional
 
   # Epic 10: Remove Legacy Bash Implementation

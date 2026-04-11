@@ -29,9 +29,9 @@ _This document builds collaboratively through step-by-step discovery. Sections a
 
 **Functional Requirements:**
 54 functional requirements across 6 categories:
-- **Sandbox Configuration (FR1-FR9, FR9a-FR9e):** YAML-driven configuration for SDKs, packages, MCP servers, mounts, secrets, env vars, agent selection, config path override, auto_isolate_deps, host_agent_config mount, and project_name override. `asbox init` generates starter config.
+- **Sandbox Configuration (FR1-FR9, FR9a-FR9e, FR56-FR59):** YAML-driven configuration for SDKs, packages, MCP servers, mounts, secrets, env vars, installed agents list, default agent selection (overridable via `--agent` CLI flag), config path override, auto_isolate_deps, boolean host_agent_config with automatic path resolution, and project_name override. Agent names use short form (`claude`, `gemini`). `asbox init` generates starter config.
 - **Sandbox Lifecycle (FR10-FR16, FR16a):** Build, run, and auto-rebuild lifecycle managed by Go CLI. TTY mode with Ctrl+C lifecycle via Tini. Docker presence and secret validation before launch. Named volume mounts assembled at launch when auto_isolate_deps enabled.
-- **Agent Runtime (FR17-FR22):** AI agents (Claude Code, Gemini CLI) run with full terminal access inside the sandbox. Claude Code runs with `--dangerously-skip-permissions` (sandbox provides isolation). Agents interact with mounted project files and can execute BMAD workflows.
+- **Agent Runtime (FR17-FR22):** AI agents (Claude Code, Gemini CLI) run with full terminal access inside the sandbox. Both agents run in permissionless mode — Claude Code with `--dangerously-skip-permissions`, Gemini CLI with `-y` (sandbox provides isolation). Agents interact with mounted project files and can execute BMAD workflows.
 - **Development Toolchain (FR23-FR30):** Local git, internet access, CLI tools, Docker/Docker Compose via inner Podman, Playwright MCP (chromium + webkit), and MCP server management inside the sandbox.
 - **Isolation Boundaries (FR31-FR37):** Git push blocked via wrapper, host filesystem restricted to declared mounts, host credentials inaccessible, inner containers network-isolated, non-privileged inner Docker, standard error codes at boundaries.
 - **Image Build System (FR38-FR54):** Dockerfile generated from embedded Go `text/template`, base images pinned to digest, SDK versions as build args, MCP servers installed at build time, content-hash image tagging, agent instruction files baked in, Tini as PID 1, UID/GID alignment, MCP manifest merge, embedded assets via Go `embed`, bmad_repos multi-repo mounts with generated agent instructions, single binary distribution.
@@ -68,13 +68,13 @@ The security model protects against **accidental leakage from AI agents that hal
 - **Git wrapper** is a convenience boundary, not a security boundary. Intercepts `git push` but does not prevent exfiltration via `curl`, `ssh`, or other network tools.
 - **Secrets as env vars** are visible via `docker inspect` and `/proc/*/environ` inside the container. Acceptable for single-developer use.
 - **Outbound internet access** means an agent could theoretically exfiltrate data. Mitigation is scoped secrets. Egress filtering is explicitly deferred.
-- **Host agent config mount** (`host_agent_config`) is read-write — the agent can read and modify OAuth tokens. This is intentional for token refresh but is the widest trust grant in the system.
+- **Host agent config mount** (`host_agent_config`) is read-write and enabled by default — the agent can read and modify OAuth tokens. This is intentional for token refresh but is the widest trust grant in the system. Paths are resolved automatically from the agent config registry based on the selected agent.
 
 ### Cross-Cutting Concerns Identified
 
 - **Two execution domains** — Go on host, bash inside container. The architecture must clearly define what runs where and how data flows across the boundary (config → Docker build args → image → Docker run flags → entrypoint env vars).
 - **Embedded asset lifecycle** — all supporting files compiled into the binary. Changes require rebuild. Version-tagged releases make the relationship explicit. The architecture must define which files are embedded and how they're extracted/used.
-- **Config as single source of truth** — `.asbox/config.yaml` is parsed once by the Go CLI and drives: template rendering, build arg assembly, run flag assembly, mount assembly, secret validation, auto_isolate_deps scanning, bmad_repos mounting. Single parse, multiple consumers.
+- **Config as single source of truth** — `.asbox/config.yaml` is parsed once by the Go CLI and drives: template rendering, build arg assembly, run flag assembly, mount assembly, secret validation, auto_isolate_deps scanning, bmad_repos mounting. Single parse, multiple consumers. The `--agent` CLI flag can override `default_agent` after parsing but before any downstream consumers read it.
 - **Content-hash scoping** — hash inputs must be carefully defined: rendered template output + config content. Changes to the Go CLI source do NOT trigger image rebuilds.
 - **Isolation enforcement is distributed** — not a standalone component. Git wrapper (shell script), network isolation (Podman rootless), filesystem isolation (mount config), secret isolation (runtime env handling). Each component owns its own isolation enforcement.
 - **Path resolution** — mount paths resolved relative to config file location, not working directory. Applies to mounts, bmad_repos, and host_agent_config.
@@ -161,7 +161,7 @@ asbox/
 **Deferred Decisions (Post-MVP):**
 - Egress filtering for outbound network
 - Audit trail / activity logging
-- Multi-agent orchestration
+- Multi-agent parallel orchestration (multiple sandboxes simultaneously)
 - Session persistence options
 - Agent-specific MCP configuration for Gemini CLI
 - `host_agent_config` integrity checking (snapshot config state on startup for post-session diff)
@@ -280,10 +280,14 @@ asbox/
 
 ### Host Agent Config (`host_agent_config`)
 
-- **Decision:** Read-write mount of host agent config directory (e.g., `~/.claude`) into container, with `CLAUDE_CONFIG_DIR` env var set
-- **Rationale:** Enables OAuth token synchronization — agent can read and refresh tokens without re-authentication. This is the widest trust grant in the system but is opt-in and explicit.
+- **Decision:** Boolean flag (default: true) that automatically mounts the host agent config directory read-write into the container, with paths resolved from the agent config registry based on the selected agent at runtime
+- **Agent config registry:** Maps each agent to its default host config directory, container target, and environment variable:
+  - `claude`: `~/.claude` -> `/opt/claude-config`, `CLAUDE_CONFIG_DIR`
+  - `gemini`: `~/.gemini` -> `/opt/gemini-config`, `GEMINI_CONFIG_DIR`
+- **Rationale:** Enables OAuth token synchronization — agent can read and refresh tokens without re-authentication. Automatic path resolution eliminates manual config when switching agents via `--agent`. This is the widest trust grant in the system but is clearly visible (enabled by default, explicitly disableable).
+- **Silent skip:** If the host config directory does not exist (agent not set up on host), the mount is silently skipped — no error. This supports multi-agent images where not all agents are configured on the host.
 - **Known limitation (Phase 2):** No integrity checking — an agent with write access could modify configuration that persists after the sandbox exits. Future enhancement: snapshot config directory state on startup for post-session diff.
-- **Affects:** `cmd/run.go` (mount flag + env var assembly)
+- **Affects:** `internal/config/config.go` (AgentConfigRegistry), `internal/mount/mount.go` (AssembleHostAgentConfig), `cmd/run.go` (mount flag + env var assembly)
 
 ### Decision Impact Analysis
 
@@ -320,7 +324,7 @@ These patterns ensure that AI agents implementing different parts of asbox produ
 
 **Function/method naming:** `PascalCase` for exported, `camelCase` for unexported. Verb-first for actions: `ParseConfig`, `RenderTemplate`, `BuildImage`, `RunContainer`
 
-**Struct naming:** `PascalCase`, noun-based. Config structs mirror YAML structure: `Config`, `SDKConfig`, `MountConfig`, `SecretConfig`
+**Struct naming:** `PascalCase`, noun-based. Config structs mirror YAML structure: `Config`, `SDKConfig`, `MountConfig`, `AgentConfigMapping`
 
 **Variable naming:** `camelCase` — `configPath`, `imageName`, `mountFlags`. No abbreviations except universally understood ones (`ctx`, `err`, `cmd`).
 
@@ -398,11 +402,11 @@ set -euo pipefail
 
 **Package responsibilities:**
 - `cmd/` — Cobra commands, flag parsing, exit code mapping. No business logic.
-- `internal/config/` — YAML parsing, typed structs, validation (required fields, path resolution). Single `Parse()` function returns validated `Config` struct.
+- `internal/config/` — YAML parsing, typed structs, validation (required fields, path resolution), agent config registry. Single `Parse()` function returns validated `Config` struct. Exported `ValidateAgent()` and `ValidateAgentInstalled()` for CLI flag validation.
 - `internal/template/` — Dockerfile rendering from validated config. Single `Render()` function. Assumes valid input.
 - `internal/docker/` — Docker/Podman CLI interaction via `os/exec`. Build and run command assembly.
 - `internal/hash/` — Content-hash computation. Pure function: inputs in, hash out.
-- `internal/mount/` — Mount flag assembly, auto_isolate_deps scanning, bmad_repos mapping with collision detection.
+- `internal/mount/` — Mount flag assembly, host agent config resolution from registry, auto_isolate_deps scanning, bmad_repos mapping with collision detection.
 - `embed/` — Single `embed.go` file exporting the embedded filesystem. All `//go:embed` directives in one place.
 
 **Dependency direction:** `cmd/` → `internal/*` → standard library. Internal packages do NOT import each other except through interfaces. `config.Config` struct is passed by value to consuming packages.
@@ -448,7 +452,7 @@ asbox/
 │   ├── root.go                      # Root command, -f flag, version, error-to-exit-code mapping
 │   ├── init.go                      # asbox init — writes starter config
 │   ├── build.go                     # asbox build — config parse → template render → docker build
-│   └── run.go                       # asbox run — config parse → build-if-needed → flag assembly → docker run
+│   └── run.go                       # asbox run — config parse → agent override → build-if-needed → flag assembly → docker run
 ├── internal/                        # Private application logic
 │   ├── config/                      # Configuration parsing and validation
 │   │   ├── config.go                # Config struct definitions, YAML tags
@@ -466,7 +470,7 @@ asbox/
 │   │   ├── hash.go                  # Compute() — SHA256 over rendered Dockerfile + scripts + digest + config
 │   │   └── hash_test.go
 │   └── mount/                       # Mount assembly and dependency isolation
-│       ├── mount.go                 # AssembleMounts() — regular mounts, host_agent_config
+│       ├── mount.go                 # AssembleMounts() — regular mounts; AssembleHostAgentConfig() — agent-aware config mount
 │       ├── isolate_deps.go          # ScanDeps() — filepath.WalkDir for package.json, volume flags
 │       ├── bmad_repos.go            # AssembleBmadRepos() — repo mounts, collision detection, instruction gen
 │       ├── mount_test.go

@@ -19,8 +19,10 @@ stepsCompleted:
   - step-e-03-edit
 inputDocuments: []
 workflowType: 'prd'
-lastEdited: '2026-04-10'
+lastEdited: '2026-04-11'
 editHistory:
+  - date: '2026-04-11'
+    changes: 'Course correction: multi-agent runtime support. Renamed agent to default_agent, added installed_agents list, added --agent CLI flag, short agent names (claude/gemini), host_agent_config simplified to boolean with automatic path resolution, gemini yolo mode. Modified FR7, FR9d, FR19, FR45. New FRs: FR56, FR57, FR58, FR59. Per sprint-change-proposal-2026-04-11.md.'
   - date: '2026-04-10'
     changes: 'Course correction: added --no-cache flag for build command. New FR55. Per sprint-change-proposal-2026-04-10-no-cache.md.'
   - date: '2026-04-10'
@@ -223,16 +225,20 @@ The asbox configuration file (`.asbox/config.yaml` by default) is the primary in
 - **Mounts:** Host directories to mount into the sandbox (project files, shared assets). Relative paths are resolved relative to the config file location, not the working directory.
 - **Secrets:** Names of host environment variables to inject into the sandbox. The config declares which secrets are needed; the CLI resolves their values from the host environment at runtime and passes them via `docker run --env`. If a declared secret is not set in the host environment, the CLI errors with a clear message. Secrets never appear in the config file.
 - **Environment variables:** Non-secret configuration for the agent runtime
-- **Agent runtime:** Which AI agent to run, mapped to specific commands inside the container:
-  - `claude-code` -> `claude --dangerously-skip-permissions` (permissions handled by sandbox isolation). Installed via official Anthropic install script.
-  - `gemini-cli` -> `gemini`. Installed via npm global install.
-- **Host agent config:** Optional read-write mount of the host agent's configuration directory (e.g., `~/.claude`) into the container for OAuth token synchronization. Sets the corresponding config directory environment variable (e.g., `CLAUDE_CONFIG_DIR`) so the agent can read and refresh tokens.
+- **Installed agents:** Which AI agents to install in the sandbox image. Supports `claude` and `gemini`. Multiple agents can be installed in the same image.
+- **Default agent:** Which agent to launch by default, must be in the installed agents list. Can be overridden at runtime via `asbox run --agent <name>`. Agent names map to commands:
+  - `claude` -> `claude --dangerously-skip-permissions` (permissions handled by sandbox isolation). Installed via official Anthropic install script.
+  - `gemini` -> `gemini -y` (permissions skipped, sandbox provides isolation). Installed via npm global install.
+- **Host agent config:** Boolean flag (default: true) that automatically mounts the host agent's configuration directory into the container for OAuth token synchronization. Paths are resolved automatically based on the selected agent (claude: `~/.claude` -> `/opt/claude-config`, gemini: `~/.gemini` -> `/opt/gemini-config`). Sets the corresponding config directory environment variable. If the host directory does not exist (agent not set up on host), the mount is silently skipped.
 - **Project name:** Optional override for the project identifier used in image and volume naming. Defaults to the parent directory name of the `.asbox/` folder, sanitized to lowercase alphanumeric with hyphens.
 - **BMAD multi-repo workflow (`bmad_repos`):** A list of local paths to checked-out repositories. When configured, the system automatically creates mounts for each repository into `/workspace/repos/<repo_name>` inside the sandbox container. An agent configuration file (e.g., `CLAUDE.md`) is generated and mounted that instructs the agent to perform git operations and code changes within the relevant repositories under the `repos/` directory. This enables development workflows that span multiple repositories as a unified workspace.
 
 Example structure:
 ```yaml
-agent: claude-code
+installed_agents:
+  - claude
+  - gemini
+default_agent: claude
 project_name: my-app
 sdks:
   nodejs: "22"
@@ -247,9 +253,7 @@ mounts:
   - source: .
     target: /workspace
 auto_isolate_deps: true
-host_agent_config:
-  source: "~/.claude"
-  target: "/opt/claude-config"
+# host_agent_config: true  (enabled by default)
 bmad_repos:
   - /Users/manuel/repos/frontend-app
   - /Users/manuel/repos/api-service
@@ -272,11 +276,12 @@ When `auto_isolate_deps` is enabled, asbox scans all mounted project paths at la
 
 **Commands:**
 - `asbox build` -- Builds the sandbox container image from configuration. Reads `.asbox/config.yaml` by default, override with `-f path/to/config.yaml`.
-- `asbox run` -- Builds if image not present, then launches the sandbox in TTY mode with the configured agent. Override config with `-f`. The container runs interactively; Ctrl+C stops it.
+- `asbox run` -- Builds if image not present, then launches the sandbox in TTY mode with the configured agent. Override config with `-f`. Override agent with `--agent`. The container runs interactively; Ctrl+C stops it.
 - `asbox init` -- Generates a starter `.asbox/config.yaml` with sensible defaults and inline comments.
 
 **Flags:**
 - `-f, --file` -- Path to config file (default: `.asbox/config.yaml`)
+- `--agent` -- Override the default agent for this session (must be in `installed_agents`)
 - `--help` for usage information
 
 **Exit Codes:**
@@ -316,7 +321,7 @@ When `auto_isolate_deps` is enabled, asbox scans all mounted project paths at la
 - Rootless Podman 5.x installed from upstream Kubic/OBS repository with docker CLI alias (`podman-docker`) for agent compatibility
 - Docker Compose v2 installed as standalone binary
 - MCP servers installed at build time; MCP manifest embedded at `/etc/sandbox/mcp-servers.json`
-- Agent CLI installed at build time: Claude Code via official Anthropic install script, Gemini CLI via npm
+- Agent CLIs installed at build time from `installed_agents` list: Claude Code via official Anthropic install script, Gemini CLI via npm. Multiple agents can be installed in the same image
 - Agent environment instruction files (`CLAUDE.md` or `GEMINI.md`) installed to agent config directory
 - Git wrapper and isolation boundaries baked into the image
 - Layer caching for fast rebuilds when only configuration changes
@@ -326,7 +331,7 @@ When `auto_isolate_deps` is enabled, asbox scans all mounted project paths at la
 - Entrypoint aligns sandbox user UID/GID with host via `HOST_UID`/`HOST_GID` environment variables (using `usermod`/`groupmod`) to ensure correct mount permissions
 - Project directory mounted at configured target path (paths resolved relative to config file location)
 - Secrets resolved from host environment variables and injected via `--env` flags (not written to filesystem)
-- Host agent config directory (if configured) mounted read-write for OAuth token synchronization, with `CLAUDE_CONFIG_DIR` set for Claude Code
+- Host agent config directory mounted read-write by default for OAuth token synchronization, with the appropriate config env var set per agent (`CLAUDE_CONFIG_DIR` for claude, `GEMINI_CONFIG_DIR` for gemini). Paths resolved automatically from agent config registry. Silently skipped if host directory does not exist
 - Inner containers available via rootless Podman with docker CLI alias. Podman runs daemonless with `vfs` storage driver, `netavark` networking with `aardvark-dns` for service name DNS resolution, and `file` events logger
 - Podman API socket started at `$XDG_RUNTIME_DIR/podman/podman.sock` with `DOCKER_HOST` pointing to it for Docker CLI compatibility
 - Healthcheck poller runs as a background daemon, polling containers every 10 seconds for health status (required because the container has no systemd to run healthcheck timers)
@@ -445,13 +450,13 @@ All of the following are non-negotiable for MVP -- removing any one breaks the c
 - FR4: Developer can declare host directories to mount into the sandbox with source and target paths
 - FR5: Developer can declare secret names that will be resolved from host environment variables at runtime
 - FR6: Developer can set non-secret environment variables for the agent runtime
-- FR7: Developer can select which AI agent runtime to use (claude-code, gemini-cli)
+- FR7: Developer can set a default AI agent runtime via `default_agent` in configuration (claude, gemini). If omitted, defaults to the first entry in `installed_agents`
 - FR8: Developer can override the default config file path with a `-f` flag
 - FR9: Developer can generate a starter configuration file with sensible defaults via `asbox init`
 - FR9a: Developer can enable automatic dependency isolation (`auto_isolate_deps: true`) to create named Docker volume mounts over platform-specific dependency directories (e.g., `node_modules/`) within mounted project paths
 - FR9b: When `auto_isolate_deps` is enabled, the system scans all mounted project paths at launch — including primary mounts and `bmad_repos` mounts — for `package.json` files and creates named Docker volumes (pattern: `asbox-<project>-<path>-node_modules`) for each corresponding `node_modules/` directory. Named volumes persist across sandbox restarts.
 - FR9c: The system logs all auto-detected dependency isolation mounts at launch so the developer has visibility into what was isolated
-- FR9d: Developer can configure a host agent configuration directory mount (`host_agent_config`) with source and target paths for OAuth token synchronization between host and sandbox
+- FR9d: Developer can enable or disable host agent configuration directory mounting via `host_agent_config` boolean (default: true). When enabled, the system automatically resolves the correct source and target paths based on the selected agent at runtime (claude: `~/.claude` -> `/opt/claude-config`, gemini: `~/.gemini` -> `/opt/gemini-config`). If the host directory does not exist, the mount is silently skipped
 - FR9e: Developer can optionally set `project_name` in configuration to override the default project identifier used for image and volume naming
 
 ### Sandbox Lifecycle
@@ -469,7 +474,7 @@ All of the following are non-negotiable for MVP -- removing any one breaks the c
 
 - FR17: AI agent can execute inside the sandbox with full terminal access
 - FR18: Claude Code agent launches with permissions skipped (sandbox provides isolation)
-- FR19: Gemini CLI agent launches with standard configuration
+- FR19: Gemini CLI agent launches with permissions skipped (`gemini -y`) since sandbox provides isolation
 - FR20: Agent can interact with project files mounted from the host
 - FR21: Agent can execute BMAD method workflows (read/write planning artifacts, project knowledge, output documents)
 - FR22: Agent can install additional packages and dependencies at runtime via package managers
@@ -505,7 +510,7 @@ All of the following are non-negotiable for MVP -- removing any one breaks the c
 - FR42: System enforces git push blocking and isolation boundaries from within the sandbox image
 - FR43: System tags images using content hash (pattern: `asbox-<project>:<hash>`) for cache management
 - FR44: System installs agent environment instruction files (`CLAUDE.md`, `GEMINI.md`) into the sandbox user's home directory at image build time, providing the agent with sandbox-specific constraints (no sudo, container runtime details, Playwright usage, e2e test workflow) so it can operate without trial-and-error troubleshooting
-- FR45: When `host_agent_config` is configured, system mounts the host agent configuration directory read-write into the sandbox and sets the appropriate config directory environment variable (e.g., `CLAUDE_CONFIG_DIR`) for the agent runtime
+- FR45: When `host_agent_config` is enabled (default: true), system resolves the host agent config directory from the agent config registry, mounts it read-write into the sandbox, and sets the appropriate config directory environment variable (`CLAUDE_CONFIG_DIR` for claude, `GEMINI_CONFIG_DIR` for gemini). If the host directory does not exist, the mount is silently skipped
 - FR46: System merges build-time MCP server manifest with project-level `.mcp.json` at runtime; project configuration takes precedence on name conflicts
 - FR47: System exits with specific exit codes to distinguish error categories: 0 (success), 1 (configuration error), 2 (usage error), 3 (missing dependency), 4 (secret validation failure). Implemented via Go structured error types.
 - FR48: System uses Tini as init process (PID 1) for proper signal forwarding and zombie process reaping
@@ -516,6 +521,10 @@ All of the following are non-negotiable for MVP -- removing any one breaks the c
 - FR53: When `bmad_repos` is configured, the system generates an agent configuration file (e.g., `CLAUDE.md`) instructing the agent that git operations and code changes should be executed within the relevant repositories under the `repos/` directory, and mounts it into the container
 - FR54: The system is distributed as a single statically-linked Go binary with no external runtime dependencies beyond Docker
 - FR55: Developer can pass `--no-cache` to `asbox build` (and implicitly to `asbox run`) to bypass the content-hash image existence check and pass `--no-cache` to the underlying Docker build, forcing a complete image rebuild with no cached layers
+- FR56: Developer can specify which agents to install in the sandbox image via `installed_agents` list in configuration. At least one agent must be listed. The Dockerfile template iterates over this list to install all specified agents at build time
+- FR57: Developer can override the default agent at runtime via `asbox run --agent <name>`. The specified agent must be in the `installed_agents` list. This allows switching agents without editing configuration
+- FR58: Agent names use short form in configuration and CLI: `claude` (maps to Claude Code CLI) and `gemini` (maps to Gemini CLI). The system maps short names to full CLI commands internally
+- FR59: The system maintains an agent config registry mapping each agent to its default host config directory, container target path, and config environment variable. This registry drives automatic `host_agent_config` path resolution
 
 ## Non-Functional Requirements
 

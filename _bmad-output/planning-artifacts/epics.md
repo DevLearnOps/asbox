@@ -149,13 +149,13 @@ N/A — asbox is a CLI tool with no GUI. No UX design document applicable.
 | FR4 | Epic 2 | Host directory mounts |
 | FR5 | Epic 2 | Secret declaration and injection |
 | FR6 | Epic 1 | Non-secret environment variables |
-| FR7 | Epic 1 | Agent runtime selection |
+| FR7 | Epic 1 | Default agent selection (overridable via --agent) |
 | FR8 | Epic 1 | Config file path override (`-f`) |
 | FR9 | Epic 1 | `asbox init` starter config |
 | FR9a | Epic 6 | auto_isolate_deps config option |
 | FR9b | Epic 6 | Scan and create volumes for node_modules |
 | FR9c | Epic 6 | Log isolated mounts |
-| FR9d | Epic 7 | host_agent_config config option |
+| FR9d | Epic 7 | host_agent_config boolean with auto path resolution |
 | FR9e | Epic 1 | project_name config override |
 | FR10 | Epic 1 | `asbox build` command |
 | FR11 | Epic 1 | `asbox run` in TTY mode |
@@ -194,7 +194,7 @@ N/A — asbox is a CLI tool with no GUI. No UX design document applicable.
 | FR42 | Epic 3 | Isolation scripts baked into image |
 | FR43 | Epic 1 | Content-hash image tagging |
 | FR44 | Epic 1 | Agent instruction files baked into image |
-| FR45 | Epic 7 | host_agent_config mount + CLAUDE_CONFIG_DIR |
+| FR45 | Epic 7 | host_agent_config auto mount + per-agent env var |
 | FR46 | Epic 5 | MCP manifest merge at runtime |
 | FR47 | Epic 1 | Go structured error types with exit codes |
 | FR48 | Epic 1 | Tini as PID 1 |
@@ -205,12 +205,16 @@ N/A — asbox is a CLI tool with no GUI. No UX design document applicable.
 | FR53 | Epic 8 | Generated agent instruction file for repos |
 | FR54 | Epic 1 | Single statically-linked Go binary |
 | FR55 | Epic 1 | --no-cache flag for build command |
+| FR56 | Epic 1 | installed_agents list for multi-agent image builds |
+| FR57 | Epic 1 | --agent CLI flag to override default agent at runtime |
+| FR58 | Epic 1 | Short agent names (claude, gemini) |
+| FR59 | Epic 1 | Agent config registry for automatic host_agent_config paths |
 
 ## Epic List
 
 ### Epic 1: Developer Can Build and Launch a Sandbox
-A developer can install the `asbox` binary, create a configuration file, build a container image, and launch an interactive sandbox session with a working agent inside.
-**FRs covered:** FR1, FR2, FR6, FR7, FR8, FR9, FR9e, FR10, FR11, FR12, FR13, FR14, FR15, FR38, FR39, FR40, FR43, FR44, FR47, FR48, FR49, FR50, FR54
+A developer can install the `asbox` binary, create a configuration file, build a container image, and launch an interactive sandbox session with a working agent inside. Multiple agents can be installed in a single image and switched at runtime.
+**FRs covered:** FR1, FR2, FR6, FR7, FR8, FR9, FR9e, FR10, FR11, FR12, FR13, FR14, FR15, FR38, FR39, FR40, FR43, FR44, FR47, FR48, FR49, FR50, FR54, FR56, FR57, FR58, FR59
 
 ### Epic 2: Agent Can Work With Project Files and Git
 An agent inside the sandbox can access mounted project files, use local git, install packages, and work with CLI tools and internet — a complete development workflow minus Docker and MCP.
@@ -233,7 +237,7 @@ The sandbox automatically detects and isolates `node_modules/` directories using
 **FRs covered:** FR9a, FR9b, FR9c, FR16a
 
 ### Epic 7: Developer Can Share Host Agent Authentication
-A developer can mount their host agent config directory so the sandbox agent picks up existing OAuth tokens without re-authentication each session.
+Host agent config directory is automatically mounted based on the selected agent, so the sandbox agent picks up existing OAuth tokens without re-authentication each session. Enabled by default, paths resolved automatically from the agent config registry.
 **FRs covered:** FR9d, FR45
 
 ### Epic 8: Developer Can Run Multi-Repo BMAD Workflows
@@ -542,11 +546,72 @@ So that I have a working starting point for configuring my sandbox.
 
 **Implementation Notes:**
 - `cmd/init.go` — reads `config.yaml` from `embed.Assets`, writes to target path
-- `embed/config.yaml` — starter template with inline comments, default agent claude-code, example SDK, example mount
+- `embed/config.yaml` — starter template with inline comments, default agent claude, example SDK, example mount
+
+### Story 1.9: Multi-Agent Runtime Support
+
+As a developer,
+I want to install multiple agents in a single sandbox image and switch between them at runtime,
+So that I can work with Claude and Gemini without rebuilding or editing config.
+
+**Acceptance Criteria:**
+
+**Given** a config with `installed_agents: [claude, gemini]`
+**When** the sandbox image is built
+**Then** both Claude Code and Gemini CLI are installed in the image
+
+**Given** a config with `installed_agents: [claude, gemini]` and `default_agent: claude`
+**When** the developer runs `asbox run`
+**Then** the sandbox launches with Claude Code (`claude --dangerously-skip-permissions`)
+
+**Given** a config with `installed_agents: [claude, gemini]`
+**When** the developer runs `asbox run --agent gemini`
+**Then** the sandbox launches with Gemini CLI (`gemini -y`), overriding the default
+
+**Given** a config with `installed_agents: [claude]`
+**When** the developer runs `asbox run --agent gemini`
+**Then** the CLI exits with code 1: `"error: agent 'gemini' is not installed in the image. Installed agents: claude. Add it to installed_agents in config or choose a different agent"`
+
+**Given** a config with `installed_agents: [claude, gemini]` and no `default_agent` set
+**When** the developer runs `asbox run`
+**Then** the first agent in the list (`claude`) is used as the default
+
+**Given** agent names use short form (`claude`, `gemini`)
+**When** the config or CLI flag uses an old-style name (e.g., `claude-code`)
+**Then** the CLI exits with code 1: `"error: unsupported agent 'claude-code'. Use 'claude' or 'gemini'"`
+
+**Given** `host_agent_config` is enabled (default) and agent is `claude`
+**When** the sandbox launches and `~/.claude` exists on the host
+**Then** `~/.claude` is mounted read-write at `/opt/claude-config` and `CLAUDE_CONFIG_DIR=/opt/claude-config` is set
+
+**Given** `host_agent_config` is enabled (default) and agent is `gemini`
+**When** the sandbox launches and `~/.gemini` exists on the host
+**Then** `~/.gemini` is mounted read-write at `/opt/gemini-config` and `GEMINI_CONFIG_DIR=/opt/gemini-config` is set
+
+**Given** `host_agent_config` is enabled and the host config directory does not exist (e.g., `~/.gemini` missing)
+**When** the sandbox launches
+**Then** the mount is silently skipped -- no error
+
+**Given** `host_agent_config: false` in config
+**When** the sandbox launches
+**Then** no host agent config directory is mounted regardless of agent
+
+**Given** Gemini CLI is selected as the agent
+**When** the sandbox launches
+**Then** Gemini CLI runs with `-y` flag (yolo mode, no permission prompts)
+
+**Implementation Notes:**
+- `internal/config/config.go` -- rename `Agent` to `DefaultAgent`, add `InstalledAgents []string`, change `HostAgentConfig` from `*MountConfig` to `*bool`, add `AgentConfigMapping` type and `AgentConfigRegistry`
+- `internal/config/parse.go` -- validate `installed_agents` (required, all valid), validate `default_agent` is in list (default to first entry), remove `host_agent_config` source/target validation, add `ValidateAgent()` and `ValidateAgentInstalled()` exported functions, update `validAgents` to short names (`claude`, `gemini`)
+- `cmd/run.go` -- add `--agent` string flag, agent override logic after config parse, update `agentCommand()` for short names and gemini `-y`, replace `host_agent_config` MountConfig logic with boolean + `AssembleHostAgentConfig()`
+- `internal/mount/mount.go` -- simplify `AssembleMounts()` (remove host_agent_config), add `AssembleHostAgentConfig(agent)` with registry lookup and tilde expansion
+- `embed/Dockerfile.tmpl` -- iterate `InstalledAgents` for agent installation blocks
+- `embed/config.yaml` -- restructure for `installed_agents`, `default_agent`, boolean `host_agent_config`
+- Update all agent name references throughout codebase (`claude-code` -> `claude`, `gemini-cli` -> `gemini`)
 
 ## Epic 2: Agent Can Work With Project Files and Git
 
-An agent inside the sandbox can access mounted project files, use local git, install packages, and work with CLI tools and internet — a complete development workflow minus Docker and MCP.
+An agent inside the sandbox can access mounted project files, use local git, install packages, and work with CLI tools and internet -- a complete development workflow minus Docker and MCP.
 
 ### Story 2.1: Host Directory Mounts and Secret Injection
 
@@ -814,26 +879,35 @@ A developer can mount their host agent config directory so the sandbox agent pic
 ### Story 7.1: Host Agent Config Mount for OAuth Token Sync
 
 As a developer,
-I want to mount my host agent config directory into the sandbox,
-So that the agent picks up my existing authentication without re-login each session.
+I want the sandbox to automatically mount my host agent config directory based on the selected agent,
+So that the agent picks up my existing authentication without re-login or manual path configuration.
 
 **Acceptance Criteria:**
 
-**Given** a config with `host_agent_config: {source: "~/.claude", target: "/opt/claude-config"}`
-**When** the sandbox launches
+**Given** `host_agent_config` is not set in config (default: enabled) and agent is `claude`
+**When** the sandbox launches and `~/.claude` exists on the host
 **Then** `~/.claude` is mounted read-write at `/opt/claude-config` and `CLAUDE_CONFIG_DIR=/opt/claude-config` is set
 
-**Given** the host `~/.claude` contains valid OAuth tokens
+**Given** `host_agent_config` is not set in config (default: enabled) and agent is `gemini`
+**When** the sandbox launches and `~/.gemini` exists on the host
+**Then** `~/.gemini` is mounted read-write at `/opt/gemini-config` and `GEMINI_CONFIG_DIR=/opt/gemini-config` is set
+
+**Given** the host agent config directory contains valid OAuth tokens
 **When** the agent refreshes tokens during a session
 **Then** updated tokens are written back to the host directory via the read-write mount
 
-**Given** `host_agent_config` is not configured
+**Given** `host_agent_config` is enabled and the host config directory does not exist
 **When** the sandbox launches
-**Then** no additional mount or env var is added
+**Then** the mount is silently skipped -- no error (agent not set up on host)
+
+**Given** `host_agent_config: false` in config
+**When** the sandbox launches
+**Then** no host agent config directory is mounted regardless of agent
 
 **Implementation Notes:**
-- `cmd/run.go` — mount flag + env var assembly for `host_agent_config`
-- `~` expansion via `os.UserHomeDir()`
+- `internal/config/config.go` -- `AgentConfigRegistry` maps agent names to `{Source, Target, EnvVar}`
+- `internal/mount/mount.go` -- `AssembleHostAgentConfig(agent)` resolves paths from registry, tilde expansion, validates directory exists
+- `cmd/run.go` -- boolean check (`nil` = enabled, `true` = enabled, `false` = disabled), calls `AssembleHostAgentConfig()` with resolved agent name
 - Known limitation (Phase 2): no integrity checking on config directory changes
 
 ## Epic 8: Developer Can Run Multi-Repo BMAD Workflows
@@ -979,7 +1053,43 @@ So that advanced features are validated automatically.
 **Implementation Notes:**
 - `integration/mcp_test.go` — manifest presence, .mcp.json generation
 - `integration/isolate_deps_test.go` — named volume creation verification (check via `docker inspect`)
-- `integration/bmad_repos_test.go` — mount verification, instruction file presence
+- `integration/bmad_repos_test.go` -- mount verification, instruction file presence
+
+### Story 9.5: Multi-Agent Config and Flag Tests
+
+As a developer,
+I want integration tests for the multi-agent configuration, --agent flag override, and boolean host_agent_config,
+So that agent switching and config resolution are validated automatically.
+
+**Acceptance Criteria:**
+
+**Given** a test config with `installed_agents: [claude, gemini]`
+**When** the sandbox image is built
+**Then** both `claude` and `gemini` CLI commands are available inside the container
+
+**Given** a test config with `installed_agents: [claude, gemini]` and `default_agent: claude`
+**When** the sandbox launches without `--agent` flag
+**Then** the agent command is `claude --dangerously-skip-permissions`
+
+**Given** a test config with `installed_agents: [claude, gemini]`
+**When** the sandbox launches with `--agent gemini`
+**Then** the agent command is `gemini -y`
+
+**Given** a test config with `installed_agents: [claude]`
+**When** `--agent gemini` is passed
+**Then** the CLI exits with code 1 with a clear error about gemini not being installed
+
+**Given** a test config with `host_agent_config: true` (or default)
+**When** the sandbox launches with a valid host agent config directory
+**Then** the directory is mounted and the appropriate env var is set
+
+**Given** a test config with `host_agent_config: false`
+**When** the sandbox launches
+**Then** no host agent config mount is present
+
+**Implementation Notes:**
+- `integration/multi_agent_test.go` -- agent flag override, installed_agents validation, host_agent_config boolean
+- Config parsing unit tests in `internal/config/parse_test.go` -- short names, installed_agents validation, default_agent resolution
 
 ## Epic 10: Remove Legacy Bash Implementation
 
