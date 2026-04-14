@@ -51,7 +51,9 @@ var runCmd = &cobra.Command{
 		}
 		if hostMountFlag != "" {
 			mountFlags = append(mountFlags, hostMountFlag)
-			envVars[envKey] = envVal
+			if envKey != "" {
+				envVars[envKey] = envVal
+			}
 		}
 
 		// Mount BMAD multi-repo directories and generate agent instructions
@@ -173,7 +175,7 @@ func agentCommand(agent string) (string, error) {
 	case "gemini":
 		return "gemini -y", nil
 	case "codex":
-		return "codex --dangerously-bypass-approvals-and-sandbox --instructions /home/sandbox/CODEX.md", nil
+		return "codex --dangerously-bypass-approvals-and-sandbox", nil
 	default:
 		return "", fmt.Errorf("unknown agent %q: supported agents are claude, gemini, codex", agent)
 	}
@@ -186,7 +188,7 @@ func agentInstructionTarget(agent string) (string, error) {
 	case "gemini":
 		return "/home/sandbox/GEMINI.md", nil
 	case "codex":
-		return "/home/sandbox/CODEX.md", nil
+		return "/home/sandbox/.codex/AGENTS.md", nil
 	default:
 		return "", fmt.Errorf("bmad_repos: unsupported agent %q for instruction file mount", agent)
 	}

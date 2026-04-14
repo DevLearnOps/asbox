@@ -246,8 +246,8 @@ func TestAssembleHostAgentConfig_codexWithExistingDir(t *testing.T) {
 	config.AgentConfigRegistry["codex"] = config.AgentConfigMapping{
 		Source: codexDir,
 		Target: "/opt/codex-config",
-		EnvVar: "CODEX_HOME",
-		EnvVal: "/opt/codex-config",
+		EnvVar: "",
+		EnvVal: "",
 	}
 	t.Cleanup(func() { config.AgentConfigRegistry["codex"] = origMapping })
 
@@ -258,11 +258,11 @@ func TestAssembleHostAgentConfig_codexWithExistingDir(t *testing.T) {
 	if mountFlag != codexDir+":/opt/codex-config" {
 		t.Errorf("mountFlag = %q, want %q", mountFlag, codexDir+":/opt/codex-config")
 	}
-	if envKey != "CODEX_HOME" {
-		t.Errorf("envKey = %q, want %q", envKey, "CODEX_HOME")
+	if envKey != "" {
+		t.Errorf("envKey = %q, want empty", envKey)
 	}
-	if envVal != "/opt/codex-config" {
-		t.Errorf("envVal = %q, want %q", envVal, "/opt/codex-config")
+	if envVal != "" {
+		t.Errorf("envVal = %q, want empty", envVal)
 	}
 }
 
@@ -271,8 +271,8 @@ func TestAssembleHostAgentConfig_codexMissingDirSilentSkip(t *testing.T) {
 	config.AgentConfigRegistry["codex"] = config.AgentConfigMapping{
 		Source: "/nonexistent/codex/dir",
 		Target: "/opt/codex-config",
-		EnvVar: "CODEX_HOME",
-		EnvVal: "/opt/codex-config",
+		EnvVar: "",
+		EnvVal: "",
 	}
 	t.Cleanup(func() { config.AgentConfigRegistry["codex"] = origMapping })
 

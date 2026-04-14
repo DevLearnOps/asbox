@@ -105,7 +105,8 @@ RUN cp /tmp/agent-instructions.md /home/sandbox/CLAUDE.md && chown sandbox:sandb
 RUN cp /tmp/agent-instructions.md /home/sandbox/GEMINI.md && chown sandbox:sandbox /home/sandbox/GEMINI.md
 {{- end}}
 {{- if eq . "codex"}}
-RUN cp /tmp/agent-instructions.md /home/sandbox/CODEX.md && chown sandbox:sandbox /home/sandbox/CODEX.md
+RUN mkdir -p /home/sandbox/.codex && cp /tmp/agent-instructions.md /home/sandbox/.codex/AGENTS.md && chown -R sandbox:sandbox /home/sandbox/.codex
+ENV CODEX_HOME=/home/sandbox/.codex
 {{- end}}
 {{- end}}
 RUN rm -f /tmp/agent-instructions.md

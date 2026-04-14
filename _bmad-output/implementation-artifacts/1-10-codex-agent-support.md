@@ -28,7 +28,7 @@ So that I can use Codex for autonomous coding tasks with the same isolation guar
 4. **AC4: Host Agent Config with Codex**
    **Given** `host_agent_config` is enabled (default) and agent is `codex`
    **When** the sandbox launches and `~/.codex` exists on the host
-   **Then** `~/.codex` is mounted read-write at `/opt/codex-config` and `CODEX_HOME=/opt/codex-config` is set
+   **Then** `~/.codex` is mounted read-write at `/opt/codex-config` and the entrypoint symlinks config/auth files (excluding instruction files) into `CODEX_HOME=/home/sandbox/.codex` for write-through token sync
 
 5. **AC5: Missing Host Config Silent Skip**
    **Given** `host_agent_config` is enabled and `~/.codex` does not exist on the host
@@ -38,7 +38,7 @@ So that I can use Codex for autonomous coding tasks with the same isolation guar
 6. **AC6: Codex Instruction File**
    **Given** a config with `installed_agents: [codex]`
    **When** the sandbox image is built
-   **Then** `CODEX.md` agent instruction file is present in `/home/sandbox/`
+   **Then** `AGENTS.md` instruction file is present in `/home/sandbox/.codex/` (Codex auto-discovers `AGENTS.md` from `CODEX_HOME`)
 
 7. **AC7: Codex Requires Node.js**
    **Given** codex is in `installed_agents`
@@ -48,7 +48,7 @@ So that I can use Codex for autonomous coding tasks with the same isolation guar
 ## Tasks / Subtasks
 
 - [x] Task 1: Add codex to `AgentConfigRegistry` in `internal/config/config.go` (AC: #4, #5)
-  - [x] Add registry entry: `"codex": {Source: "~/.codex", Target: "/opt/codex-config", EnvVar: "CODEX_HOME", EnvVal: "/opt/codex-config"}`
+  - [x] Add registry entry: `"codex": {Source: "~/.codex", Target: "/opt/codex-config", EnvVar: "", EnvVal: ""}` (CODEX_HOME is baked into image via Dockerfile ENV, not set at runtime — avoids nested bind mount conflict with bmad_repos instruction mount)
 - [x] Task 2: Add codex to validation in `internal/config/parse.go` (AC: #7)
   - [x] Add `"codex": true` to `validAgents` map
   - [x] Add codex to the nodejs requirement validation alongside gemini (line 105-110): `slices.Contains(cfg.InstalledAgents, "codex")`
@@ -56,11 +56,14 @@ So that I can use Codex for autonomous coding tasks with the same isolation guar
 - [x] Task 3: Add codex case to `agentCommand()` in `cmd/run.go` (AC: #2, #3)
   - [x] Add `case "codex": return "codex --dangerously-bypass-approvals-and-sandbox", nil` to switch
   - [x] Update default error message: `"supported agents are claude, gemini, codex"`
-  - [x] Add `"codex"` case to bmad_repos instruction target switch (line 82-88): target is `/home/sandbox/CODEX.md`
+  - [x] Add `"codex"` case to bmad_repos instruction target switch via `agentInstructionTarget()`: target is `/home/sandbox/.codex/AGENTS.md`
   - [x] Update `--agent` flag help text to include codex: `"(e.g., claude, gemini, codex)"`
 - [x] Task 4: Add codex installation block in `embed/Dockerfile.tmpl` (AC: #1, #6)
   - [x] Add codex case in the `{{range .InstalledAgents}}` block (after gemini, line 90): `npm install -g @openai/codex` with npm-global chown (same pattern as gemini)
-  - [x] Add codex case in the instruction file copy section (line 101): `cp` to `/home/sandbox/CODEX.md`
+  - [x] Add codex case in the instruction file copy section: `mkdir -p /home/sandbox/.codex`, copy as `AGENTS.md`, set `ENV CODEX_HOME=/home/sandbox/.codex`
+- [x] Task 4b: Add `setup_codex_home()` entrypoint function in `embed/entrypoint.sh` (AC: #4)
+  - [x] When `/opt/codex-config` is mounted and non-empty, symlink config/auth files into `CODEX_HOME` (skip `AGENTS.md` and `AGENTS.override.md` to avoid overwriting instruction file mounts)
+  - [x] Guard empty env key in `cmd/run.go` host_agent_config env var assignment
 - [x] Task 5: Update `embed/config.yaml` starter template (AC: #1)
   - [x] Add `# - codex` as commented option in `installed_agents` list (after gemini comment)
 - [x] Task 6: Update unit tests
@@ -70,8 +73,8 @@ So that I can use Codex for autonomous coding tasks with the same isolation guar
 
 ### Review Findings
 
-- [x] [Review][Patch] Add `--instructions /home/sandbox/CODEX.md` to codex command — Codex CLI does not auto-discover `CODEX.md` from home directory; requires explicit `--instructions` flag. Fixed: updated `agentCommand()` and test. [cmd/run.go:176, cmd/run_test.go:203]
-- [x] [Review][Dismiss] Codex config path `~/.codex` and `CODEX_HOME` env var verified correct — confirmed from Codex CLI source (`codex-rs/utils/home-dir/src/lib.rs`). [internal/config/config.go:36]
+- [x] [Review][Reverted] ~~Add `--instructions` to codex command~~ — Codex CLI does NOT support `--instructions` flag. It discovers instruction files automatically via `AGENTS.md` in `CODEX_HOME` directory. Fix: removed flag, renamed instruction file to `AGENTS.md`, placed in `CODEX_HOME=/home/sandbox/.codex/`. [cmd/run.go:176, embed/Dockerfile.tmpl:108-109]
+- [x] [Review][Updated] Codex config path `~/.codex` and `CODEX_HOME` — host `~/.codex` is mounted at `/opt/codex-config` for config/auth sharing, but `CODEX_HOME` is set to `/home/sandbox/.codex` (baked in Dockerfile ENV) to avoid nested bind mount conflicts. Entrypoint symlinks config files from mount into `CODEX_HOME`. Registry entry has empty EnvVar/EnvVal. [internal/config/config.go:36, embed/entrypoint.sh:setup_codex_home]
 - [x] [Review][Patch] No test for instruction-target switch (`case "codex"`) in bmad_repos code path — Fixed: extracted `agentInstructionTarget()` helper and added tests. [cmd/run.go:182-194, cmd/run_test.go:208-225]
 - [x] [Review][Defer] bmad_repos instruction mount only targets default agent, non-default agents retain generic build-time instructions [cmd/run.go:81-92] — deferred, pre-existing
 - [x] [Review][Defer] Mutable global `AgentConfigRegistry` in tests risks data races if `t.Parallel()` added [internal/mount/mount_test.go:245-277] — deferred, pre-existing
@@ -96,9 +99,9 @@ var AgentConfigRegistry = map[string]AgentConfigMapping{
 }
 ```
 
-Add one entry:
+Add one entry (EnvVar/EnvVal empty — CODEX_HOME is baked into the image to avoid nested mount conflicts):
 ```go
-    "codex": {Source: "~/.codex", Target: "/opt/codex-config", EnvVar: "CODEX_HOME", EnvVal: "/opt/codex-config"},
+    "codex": {Source: "~/.codex", Target: "/opt/codex-config", EnvVar: "", EnvVal: ""},
 ```
 
 ### Validation Changes (parse.go)
@@ -155,18 +158,10 @@ func agentCommand(agent string) (string, error) {
 }
 ```
 
-**bmad_repos instruction target switch** at `cmd/run.go:82-89` -- add codex case:
+**`agentInstructionTarget()` helper** at `cmd/run.go:182-194` -- add codex case:
 ```go
-switch cfg.DefaultAgent {
-case "claude":
-    instructionTarget = "/home/sandbox/CLAUDE.md"
-case "gemini":
-    instructionTarget = "/home/sandbox/GEMINI.md"
 case "codex":
-    instructionTarget = "/home/sandbox/CODEX.md"
-default:
-    return fmt.Errorf("bmad_repos: unsupported agent %q for instruction file mount", cfg.DefaultAgent)
-}
+    return "/home/sandbox/.codex/AGENTS.md", nil
 ```
 
 **`--agent` flag help text** at `cmd/run.go:187` -- update to include codex:
@@ -185,10 +180,11 @@ RUN npm install -g @openai/codex && \
 {{- end}}
 ```
 
-**Instruction file copy** at `embed/Dockerfile.tmpl:95-102` -- add codex case:
+**Instruction file + CODEX_HOME** at `embed/Dockerfile.tmpl` -- add codex case:
 ```
 {{- if eq . "codex"}}
-RUN cp /tmp/agent-instructions.md /home/sandbox/CODEX.md && chown sandbox:sandbox /home/sandbox/CODEX.md
+RUN mkdir -p /home/sandbox/.codex && cp /tmp/agent-instructions.md /home/sandbox/.codex/AGENTS.md && chown -R sandbox:sandbox /home/sandbox/.codex
+ENV CODEX_HOME=/home/sandbox/.codex
 {{- end}}
 ```
 
@@ -280,14 +276,16 @@ No issues encountered. All changes were additive, following established patterns
 
 ### Completion Notes List
 
-- Added codex to AgentConfigRegistry with ~/.codex source, /opt/codex-config target, CODEX_HOME env var
+- Added codex to AgentConfigRegistry with ~/.codex source, /opt/codex-config target, empty EnvVar/EnvVal (CODEX_HOME baked in image)
 - Added codex to validAgents map and Node.js requirement validation in parse.go
 - Updated ValidateAgent() error message to include codex as supported agent
-- Added codex case to agentCommand() returning "codex --dangerously-bypass-approvals-and-sandbox"
-- Added codex case to bmad_repos instruction target switch (CODEX.md)
+- Added codex case to agentCommand() returning "codex --dangerously-bypass-approvals-and-sandbox" (no --instructions flag — Codex auto-discovers AGENTS.md from CODEX_HOME)
+- Added codex case to agentInstructionTarget() returning "/home/sandbox/.codex/AGENTS.md"
 - Updated --agent flag help text to include codex
 - Added codex installation block in Dockerfile.tmpl (npm install -g @openai/codex with chown)
-- Added codex instruction file copy block in Dockerfile.tmpl (CODEX.md)
+- Added codex instruction file in Dockerfile.tmpl: creates /home/sandbox/.codex/, copies AGENTS.md, sets ENV CODEX_HOME
+- Added setup_codex_home() entrypoint function: symlinks host config/auth from /opt/codex-config into CODEX_HOME (skips AGENTS.md/AGENTS.override.md)
+- Added guard for empty envKey in run.go host_agent_config env var assignment
 - Added # - codex commented option in embed/config.yaml starter template
 - Updated host_agent_config comment to mention codex: ~/.codex
 - Updated existing test error message expectations for new 3-agent list
@@ -297,6 +295,7 @@ No issues encountered. All changes were additive, following established patterns
 ### Change Log
 
 - 2026-04-14: Implemented codex agent support across config, validation, runtime, Dockerfile template, and tests
+- 2026-04-14: Fixed codex instruction discovery — removed invalid --instructions flag, renamed to AGENTS.md in CODEX_HOME, separated CODEX_HOME from host config mount to avoid nested bind mount conflicts, added entrypoint setup_codex_home() for host config symlinks
 
 ### File List
 
@@ -308,3 +307,4 @@ No issues encountered. All changes were additive, following established patterns
 - internal/config/parse_test.go (modified: updated error expectations, added 3 codex test functions)
 - internal/mount/mount_test.go (modified: added 2 codex host agent config test functions)
 - cmd/run_test.go (modified: added 1 codex agentCommand test function)
+- embed/entrypoint.sh (modified: added setup_codex_home() function for host config symlinks)

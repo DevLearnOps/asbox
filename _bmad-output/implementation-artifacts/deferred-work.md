@@ -126,3 +126,10 @@
 - npm install with no version pinning for @openai/codex — installs latest at build time. Same pre-existing pattern as gemini. [embed/Dockerfile.tmpl:92]
 - Hardcoded supported-agent lists in error messages need manual maintenance — agent list appears as literal strings in agentCommand, ValidateAgent, and --agent flag help text. [multiple files]
 - `AGENT_CMD` via `bash -c` string expansion is fragile pattern — pre-existing for all agents. [embed/entrypoint.sh]
+
+## Deferred from: code review of 9-6-codex-agent-config-and-runtime-tests (2026-04-14)
+
+- Mutable global `AgentConfigRegistry` in tests risks data races if `t.Parallel()` added — pre-existing, tracked since story 1-10 review. [internal/mount/mount_test.go:245-277]
+- Parallel switch statements (`agentCommand`, `agentInstructionTarget`, Dockerfile.tmpl) can diverge when adding agents — pre-existing pattern, tracked since story 1-10 review. [cmd/run.go:171-195, embed/Dockerfile.tmpl:77-96]
+- No test for claude/gemini cases in extracted `agentInstructionTarget()` — pre-existing paths moved without behavior change. [cmd/run_test.go:215-230]
+- `setup_codex_home()` entrypoint function untested at integration level — symlink logic, AGENTS.md skip filter, and chown verified only by inspection; CI constraints justify deferral. [embed/entrypoint.sh:60-86]

@@ -200,8 +200,8 @@ func TestAgentCommand_codex(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cmd != "codex --dangerously-bypass-approvals-and-sandbox --instructions /home/sandbox/CODEX.md" {
-		t.Errorf("agentCommand(codex) = %q, want %q", cmd, "codex --dangerously-bypass-approvals-and-sandbox --instructions /home/sandbox/CODEX.md")
+	if cmd != "codex --dangerously-bypass-approvals-and-sandbox" {
+		t.Errorf("agentCommand(codex) = %q, want %q", cmd, "codex --dangerously-bypass-approvals-and-sandbox")
 	}
 }
 
@@ -217,8 +217,8 @@ func TestAgentInstructionTarget_codex(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if target != "/home/sandbox/CODEX.md" {
-		t.Errorf("agentInstructionTarget(codex) = %q, want %q", target, "/home/sandbox/CODEX.md")
+	if target != "/home/sandbox/.codex/AGENTS.md" {
+		t.Errorf("agentInstructionTarget(codex) = %q, want %q", target, "/home/sandbox/.codex/AGENTS.md")
 	}
 }
 

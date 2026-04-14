@@ -57,6 +57,37 @@ chown_volumes() {
     done
 }
 
+setup_codex_home() {
+    local codex_home="/home/sandbox/.codex"
+    local host_config="/opt/codex-config"
+
+    # Only act when host config directory is mounted and non-empty
+    if [[ ! -d "${host_config}" ]] || [[ -z "$(ls -A "${host_config}" 2>/dev/null)" ]]; then
+        return 0
+    fi
+
+    mkdir -p "${codex_home}"
+
+    # Symlink host config/auth files into CODEX_HOME (skip instruction files)
+    shopt -s dotglob
+    for f in "${host_config}"/*; do
+        [[ -e "$f" ]] || continue
+        local base
+        base="$(basename "$f")"
+        case "$base" in
+            AGENTS.md|AGENTS.override.md) continue ;;
+        esac
+        # Don't overwrite existing files (could be bind mounts)
+        if [[ ! -e "${codex_home}/$base" ]]; then
+            ln -sf "$f" "${codex_home}/$base"
+        fi
+    done
+
+    shopt -u dotglob
+
+    chown -Rh sandbox:sandbox "${codex_home}"
+}
+
 merge_mcp_config() {
     local build_config="/etc/sandbox/mcp-servers.json"
     local project_config="/workspace/.mcp.json"
@@ -162,6 +193,7 @@ unmask_proc() {
 unmask_proc
 align_uid_gid
 chown_volumes
+setup_codex_home
 merge_mcp_config
 start_podman_socket
 set_testcontainers_socket

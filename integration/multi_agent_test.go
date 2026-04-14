@@ -138,6 +138,95 @@ func TestMultiAgent_agentFlagValidation(t *testing.T) {
 	})
 }
 
+func TestCodex_cliAndInstructionFileInImage(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	t.Cleanup(cancel)
+
+	// Build codex image — codex requires NodeJS (npm install -g @openai/codex)
+	cfg := &config.Config{
+		InstalledAgents: []string{"claude", "codex"},
+		ProjectName:     "integration-test",
+		SDKs:            config.SDKConfig{NodeJS: "22"},
+	}
+	image := buildTestImageWithConfig(t, cfg)
+	container := startTestContainer(ctx, t, image)
+
+	t.Run("claude_cli_available", func(t *testing.T) {
+		t.Parallel()
+		_, exitCode := execInContainer(ctx, t, container, []string{"which", "claude"})
+		if exitCode != 0 {
+			t.Error("claude CLI not found in container")
+		}
+	})
+
+	t.Run("codex_cli_available", func(t *testing.T) {
+		t.Parallel()
+		_, exitCode := execInContainer(ctx, t, container, []string{"which", "codex"})
+		if exitCode != 0 {
+			t.Error("codex CLI not found in container")
+		}
+	})
+
+	t.Run("claude_instruction_file_exists", func(t *testing.T) {
+		t.Parallel()
+		if !fileExistsInContainer(ctx, t, container, "/home/sandbox/CLAUDE.md") {
+			t.Error("expected /home/sandbox/CLAUDE.md to exist")
+		}
+	})
+
+	t.Run("codex_instruction_file_exists", func(t *testing.T) {
+		t.Parallel()
+		if !fileExistsInContainer(ctx, t, container, "/home/sandbox/.codex/AGENTS.md") {
+			t.Error("expected /home/sandbox/.codex/AGENTS.md to exist")
+		}
+	})
+}
+
+func TestCodex_notInstalledExitsCode1(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	// Build binary once
+	tmpDir := t.TempDir()
+	binaryPath := filepath.Join(tmpDir, "asbox")
+	buildCmd := exec.Command("go", "build", "-o", binaryPath, ".")
+	buildCmd.Dir = ".." // project root
+	if out, err := buildCmd.CombinedOutput(); err != nil {
+		t.Fatalf("building asbox binary: %v\noutput: %s", err, out)
+	}
+
+	// Config with only claude installed (codex NOT installed)
+	configDir := t.TempDir()
+	configPath := filepath.Join(configDir, "config.yaml")
+	configContent := "installed_agents:\n  - claude\nproject_name: test-codex-agent\n"
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("writing config: %v", err)
+	}
+
+	cmd := exec.Command(binaryPath, "run", "--agent", "codex", "-f", configPath)
+	output, err := cmd.CombinedOutput()
+	outStr := string(output)
+
+	if err == nil {
+		t.Fatal("expected non-zero exit, got nil error")
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
+		t.Errorf("expected exit code 1, got %v", err)
+	}
+	if !strings.Contains(outStr, "not installed") {
+		t.Errorf("expected 'not installed' in output:\n%s", outStr)
+	}
+	if !strings.Contains(outStr, "codex") {
+		t.Errorf("expected 'codex' in output:\n%s", outStr)
+	}
+}
+
 func TestMultiAgent_hostAgentConfigDisabledNoError(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
