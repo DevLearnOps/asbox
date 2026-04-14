@@ -26,7 +26,7 @@ FR3: Developer can configure which MCP servers to pre-install (e.g., Playwright)
 FR4: Developer can declare host directories to mount into the sandbox with source and target paths
 FR5: Developer can declare secret names that will be resolved from host environment variables at runtime
 FR6: Developer can set non-secret environment variables for the agent runtime
-FR7: Developer can select which AI agent runtime to use (claude-code, gemini-cli)
+FR7: Developer can select which AI agent runtime to use (claude, gemini, codex)
 FR8: Developer can override the default config file path with a `-f` flag
 FR9: Developer can generate a starter configuration file with sensible defaults via `asbox init`
 FR9a: Developer can enable automatic dependency isolation (`auto_isolate_deps: true`) to create named Docker volume mounts over platform-specific dependency directories
@@ -45,6 +45,7 @@ FR16a: When `auto_isolate_deps` is enabled, the system creates named Docker volu
 FR17: AI agent can execute inside the sandbox with full terminal access
 FR18: Claude Code agent launches with permissions skipped (sandbox provides isolation)
 FR19: Gemini CLI agent launches with standard configuration
+FR19a: Codex CLI agent launches with approvals and sandbox bypassed (`codex --dangerously-bypass-approvals-and-sandbox`)
 FR20: Agent can interact with project files mounted from the host
 FR21: Agent can execute BMAD method workflows
 FR22: Agent can install additional packages and dependencies at runtime via package managers
@@ -70,7 +71,7 @@ FR40: System passes SDK versions as build arguments to the Dockerfile
 FR41: System installs configured MCP servers at image build time
 FR42: System enforces git push blocking and isolation boundaries from within the sandbox image
 FR43: System tags images using content hash (pattern: `asbox-<project>:<hash>`) for cache management
-FR44: System installs agent environment instruction files (CLAUDE.md, GEMINI.md) into the sandbox user's home directory at image build time
+FR44: System installs agent environment instruction files (CLAUDE.md, GEMINI.md, CODEX.md) into the sandbox user's home directory at image build time
 FR45: When `host_agent_config` is configured, system mounts the host agent configuration directory read-write and sets the config directory environment variable (e.g., CLAUDE_CONFIG_DIR)
 FR46: System merges build-time MCP server manifest with project-level `.mcp.json` at runtime; project config takes precedence on name conflicts
 FR47: System exits with specific exit codes to distinguish error categories: 0 (success), 1 (configuration error), 2 (usage error), 3 (missing dependency), 4 (secret validation failure). Implemented via Go structured error types.
@@ -168,6 +169,7 @@ N/A — asbox is a CLI tool with no GUI. No UX design document applicable.
 | FR17 | Epic 2 | Agent terminal access |
 | FR18 | Epic 2 | Claude Code with --dangerously-skip-permissions |
 | FR19 | Epic 2 | Gemini CLI standard launch |
+| FR19a | Epic 2 | Codex CLI with --dangerously-bypass-approvals-and-sandbox |
 | FR20 | Epic 2 | Agent interacts with mounted files |
 | FR21 | Epic 2 | BMAD workflow support |
 | FR22 | Epic 2 | Runtime package installation |
@@ -207,7 +209,7 @@ N/A — asbox is a CLI tool with no GUI. No UX design document applicable.
 | FR55 | Epic 1 | --no-cache flag for build command |
 | FR56 | Epic 1 | installed_agents list for multi-agent image builds |
 | FR57 | Epic 1 | --agent CLI flag to override default agent at runtime |
-| FR58 | Epic 1 | Short agent names (claude, gemini) |
+| FR58 | Epic 1 | Short agent names (claude, gemini, codex) |
 | FR59 | Epic 1 | Agent config registry for automatic host_agent_config paths |
 
 ## Epic List
@@ -218,7 +220,7 @@ A developer can install the `asbox` binary, create a configuration file, build a
 
 ### Epic 2: Agent Can Work With Project Files and Git
 An agent inside the sandbox can access mounted project files, use local git, install packages, and work with CLI tools and internet — a complete development workflow minus Docker and MCP.
-**FRs covered:** FR4, FR5, FR16, FR17, FR18, FR19, FR20, FR21, FR22, FR23, FR24, FR25
+**FRs covered:** FR4, FR5, FR16, FR17, FR18, FR19, FR19a, FR20, FR21, FR22, FR23, FR24, FR25
 
 ### Epic 3: Sandbox Enforces Isolation Boundaries
 The sandbox enforces hard boundaries: git push is blocked, host filesystem is restricted, host credentials are inaccessible, and boundary violations return standard CLI error codes.
@@ -552,7 +554,7 @@ So that I have a working starting point for configuring my sandbox.
 
 As a developer,
 I want to install multiple agents in a single sandbox image and switch between them at runtime,
-So that I can work with Claude and Gemini without rebuilding or editing config.
+So that I can work with Claude, Gemini, and Codex without rebuilding or editing config.
 
 **Acceptance Criteria:**
 
@@ -576,9 +578,9 @@ So that I can work with Claude and Gemini without rebuilding or editing config.
 **When** the developer runs `asbox run`
 **Then** the first agent in the list (`claude`) is used as the default
 
-**Given** agent names use short form (`claude`, `gemini`)
+**Given** agent names use short form (`claude`, `gemini`, `codex`)
 **When** the config or CLI flag uses an old-style name (e.g., `claude-code`)
-**Then** the CLI exits with code 1: `"error: unsupported agent 'claude-code'. Use 'claude' or 'gemini'"`
+**Then** the CLI exits with code 1: `"error: unsupported agent 'claude-code'. Use 'claude', 'gemini', or 'codex'"`
 
 **Given** `host_agent_config` is enabled (default) and agent is `claude`
 **When** the sandbox launches and `~/.claude` exists on the host
@@ -602,12 +604,56 @@ So that I can work with Claude and Gemini without rebuilding or editing config.
 
 **Implementation Notes:**
 - `internal/config/config.go` -- rename `Agent` to `DefaultAgent`, add `InstalledAgents []string`, change `HostAgentConfig` from `*MountConfig` to `*bool`, add `AgentConfigMapping` type and `AgentConfigRegistry`
-- `internal/config/parse.go` -- validate `installed_agents` (required, all valid), validate `default_agent` is in list (default to first entry), remove `host_agent_config` source/target validation, add `ValidateAgent()` and `ValidateAgentInstalled()` exported functions, update `validAgents` to short names (`claude`, `gemini`)
+- `internal/config/parse.go` -- validate `installed_agents` (required, all valid), validate `default_agent` is in list (default to first entry), remove `host_agent_config` source/target validation, add `ValidateAgent()` and `ValidateAgentInstalled()` exported functions, update `validAgents` to short names (`claude`, `gemini`, `codex`)
 - `cmd/run.go` -- add `--agent` string flag, agent override logic after config parse, update `agentCommand()` for short names and gemini `-y`, replace `host_agent_config` MountConfig logic with boolean + `AssembleHostAgentConfig()`
 - `internal/mount/mount.go` -- simplify `AssembleMounts()` (remove host_agent_config), add `AssembleHostAgentConfig(agent)` with registry lookup and tilde expansion
 - `embed/Dockerfile.tmpl` -- iterate `InstalledAgents` for agent installation blocks
 - `embed/config.yaml` -- restructure for `installed_agents`, `default_agent`, boolean `host_agent_config`
-- Update all agent name references throughout codebase (`claude-code` -> `claude`, `gemini-cli` -> `gemini`)
+- Update all agent name references throughout codebase (`claude-code` -> `claude`, `gemini-cli` -> `gemini`). Add `codex` to validAgents, AgentConfigRegistry, agentCommand(), and Dockerfile template installation blocks.
+
+### Story 1.10: Codex Agent Support
+
+As a developer,
+I want to install and run OpenAI Codex CLI as a sandboxed agent,
+So that I can use Codex for autonomous coding tasks with the same isolation guarantees as Claude and Gemini.
+
+**Acceptance Criteria:**
+
+**Given** a config with `installed_agents: [codex]`
+**When** the sandbox image is built
+**Then** Codex CLI is installed via `npm install -g @openai/codex`
+
+**Given** a config with `installed_agents: [claude, codex]` and `default_agent: codex`
+**When** the developer runs `asbox run`
+**Then** the sandbox launches with Codex CLI (`codex --dangerously-bypass-approvals-and-sandbox`)
+
+**Given** a config with `installed_agents: [claude, gemini, codex]`
+**When** the developer runs `asbox run --agent codex`
+**Then** the sandbox launches with Codex CLI, overriding the default
+
+**Given** `host_agent_config` is enabled (default) and agent is `codex`
+**When** the sandbox launches and `~/.codex` exists on the host
+**Then** `~/.codex` is mounted read-write at `/opt/codex-config` and `CODEX_HOME=/opt/codex-config` is set
+
+**Given** `host_agent_config` is enabled and `~/.codex` does not exist on the host
+**When** the sandbox launches with codex
+**Then** the mount is silently skipped -- no error
+
+**Given** a config with `installed_agents: [codex]`
+**When** the sandbox image is built
+**Then** `CODEX.md` agent instruction file is present in the sandbox user's home directory
+
+**Given** codex is in `installed_agents`
+**When** validating the config
+**Then** `sdks.nodejs` must be set (codex requires Node.js, same validation as gemini)
+
+**Implementation Notes:**
+- `internal/config/config.go` -- add codex entry to `AgentConfigRegistry`: `{Source: "~/.codex", Target: "/opt/codex-config", EnvVar: "CODEX_HOME", EnvVal: "/opt/codex-config"}`
+- `internal/config/parse.go` -- add `"codex": true` to `validAgents` map, add codex to nodejs requirement validation alongside gemini
+- `cmd/run.go` -- add `"codex"` case to `agentCommand()` returning `"codex --dangerously-bypass-approvals-and-sandbox"`
+- `embed/Dockerfile.tmpl` -- add codex installation block in the `{{range .InstalledAgents}}` section: `npm install -g @openai/codex` (same pattern as gemini)
+- `embed/Dockerfile.tmpl` -- add codex case to agent instruction file copy: `CODEX.md`
+- `embed/config.yaml` -- add codex as commented option in `installed_agents`
 
 ## Epic 2: Agent Can Work With Project Files and Git
 
@@ -928,7 +974,7 @@ So that the agent can work across multiple repos in a unified workspace.
 
 **Given** `bmad_repos` is configured
 **When** the system generates agent instructions
-**Then** a CLAUDE.md (or GEMINI.md) is generated from Go template with the repo list and instructions for git operations within `repos/`, mounted into the container
+**Then** a CLAUDE.md (or GEMINI.md or CODEX.md) is generated from Go template with the repo list and instructions for git operations within `repos/`, mounted into the container
 
 **Given** two repo paths resolve to the same basename
 **When** the developer runs `asbox run`
@@ -1090,6 +1136,43 @@ So that agent switching and config resolution are validated automatically.
 **Implementation Notes:**
 - `integration/multi_agent_test.go` -- agent flag override, installed_agents validation, host_agent_config boolean
 - Config parsing unit tests in `internal/config/parse_test.go` -- short names, installed_agents validation, default_agent resolution
+
+### Story 9.6: Codex Agent Config and Runtime Tests
+
+As a developer,
+I want integration tests for codex agent configuration, installation, and runtime behavior,
+So that codex support is validated alongside claude and gemini.
+
+**Acceptance Criteria:**
+
+**Given** a test config with `installed_agents: [claude, codex]`
+**When** the sandbox image is built
+**Then** both `claude` and `codex` CLI commands are available inside the container
+
+**Given** a test config with `installed_agents: [codex]` and `default_agent: codex`
+**When** the sandbox launches
+**Then** the agent command is `codex --dangerously-bypass-approvals-and-sandbox`
+
+**Given** a test config with `installed_agents: [claude, gemini, codex]`
+**When** the sandbox launches with `--agent codex`
+**Then** the agent command is `codex --dangerously-bypass-approvals-and-sandbox`
+
+**Given** a test config with `installed_agents: [claude]`
+**When** `--agent codex` is passed
+**Then** the CLI exits with code 1 with a clear error about codex not being installed
+
+**Given** a test config with `host_agent_config: true` and agent is `codex`
+**When** the sandbox launches with a valid `~/.codex` directory
+**Then** the directory is mounted and `CODEX_HOME` env var is set
+
+**Given** a test config with `installed_agents: [codex]` and the `CODEX.md` instruction file
+**When** inspecting the container
+**Then** `CODEX.md` is present in the sandbox user's home directory
+
+**Implementation Notes:**
+- Extend `integration/multi_agent_test.go` with codex-specific test cases
+- Config parsing unit tests in `internal/config/parse_test.go` -- codex in validAgents, nodejs requirement validation
+- `internal/mount/mount_test.go` -- codex entry in AssembleHostAgentConfig tests
 
 ## Epic 10: Remove Legacy Bash Implementation
 

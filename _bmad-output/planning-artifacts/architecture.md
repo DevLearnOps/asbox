@@ -29,9 +29,9 @@ _This document builds collaboratively through step-by-step discovery. Sections a
 
 **Functional Requirements:**
 54 functional requirements across 6 categories:
-- **Sandbox Configuration (FR1-FR9, FR9a-FR9e, FR56-FR59):** YAML-driven configuration for SDKs, packages, MCP servers, mounts, secrets, env vars, installed agents list, default agent selection (overridable via `--agent` CLI flag), config path override, auto_isolate_deps, boolean host_agent_config with automatic path resolution, and project_name override. Agent names use short form (`claude`, `gemini`). `asbox init` generates starter config.
+- **Sandbox Configuration (FR1-FR9, FR9a-FR9e, FR56-FR59):** YAML-driven configuration for SDKs, packages, MCP servers, mounts, secrets, env vars, installed agents list, default agent selection (overridable via `--agent` CLI flag), config path override, auto_isolate_deps, boolean host_agent_config with automatic path resolution, and project_name override. Agent names use short form (`claude`, `gemini`, `codex`). `asbox init` generates starter config.
 - **Sandbox Lifecycle (FR10-FR16, FR16a):** Build, run, and auto-rebuild lifecycle managed by Go CLI. TTY mode with Ctrl+C lifecycle via Tini. Docker presence and secret validation before launch. Named volume mounts assembled at launch when auto_isolate_deps enabled.
-- **Agent Runtime (FR17-FR22):** AI agents (Claude Code, Gemini CLI) run with full terminal access inside the sandbox. Both agents run in permissionless mode — Claude Code with `--dangerously-skip-permissions`, Gemini CLI with `-y` (sandbox provides isolation). Agents interact with mounted project files and can execute BMAD workflows.
+- **Agent Runtime (FR17-FR22):** AI agents (Claude Code, Gemini CLI, Codex CLI) run with full terminal access inside the sandbox. All agents run in permissionless mode — Claude Code with `--dangerously-skip-permissions`, Gemini CLI with `-y`, Codex CLI with `--dangerously-bypass-approvals-and-sandbox` (sandbox provides isolation). Agents interact with mounted project files and can execute BMAD workflows.
 - **Development Toolchain (FR23-FR30):** Local git, internet access, CLI tools, Docker/Docker Compose via inner Podman, Playwright MCP (chromium + webkit), and MCP server management inside the sandbox.
 - **Isolation Boundaries (FR31-FR37):** Git push blocked via wrapper, host filesystem restricted to declared mounts, host credentials inaccessible, inner containers network-isolated, non-privileged inner Docker, standard error codes at boundaries.
 - **Image Build System (FR38-FR54):** Dockerfile generated from embedded Go `text/template`, base images pinned to digest, SDK versions as build args, MCP servers installed at build time, content-hash image tagging, agent instruction files baked in, Tini as PID 1, UID/GID alignment, MCP manifest merge, embedded assets via Go `embed`, bmad_repos multi-repo mounts with generated agent instructions, single binary distribution.
@@ -124,7 +124,7 @@ asbox/
 │   ├── entrypoint.sh           # Container entrypoint
 │   ├── git-wrapper.sh          # Git push interceptor
 │   ├── healthcheck-poller.sh   # Healthcheck daemon
-│   ├── agent-instructions.md   # Agent CLAUDE.md/GEMINI.md template
+│   ├── agent-instructions.md   # Agent CLAUDE.md/GEMINI.md/CODEX.md template
 │   └── config.yaml             # Starter config for asbox init
 ├── integration/                # Integration tests (testcontainers-go)
 └── README.md
@@ -275,7 +275,7 @@ asbox/
 - **Decision:** Each repo path mounted to `/workspace/repos/<basename>`, agent instruction file generated from Go template
 - **Rationale:** Enables multi-repository development workflows. Convention-based target mapping keeps config simple (flat list of paths). Generated agent instructions ensure the agent knows where repos are and how to work with them.
 - **Basename collision detection:** If two repo paths resolve to the same basename (e.g., `/Users/manuel/repos/client` and `/Users/manuel/work/client`), the CLI errors with exit code 1: `"error: bmad_repos basename collision — 'client' resolves from both /Users/manuel/repos/client and /Users/manuel/work/client. Rename one directory or use symlinks to disambiguate."` No automatic disambiguation — explicit failure forces the user to resolve the ambiguity.
-- **Implementation:** `internal/mount/` package assembles mount flags with collision check. Go `text/template` generates agent instruction file (CLAUDE.md/GEMINI.md) with repo list. Instruction file mounted into container at agent's expected config location.
+- **Implementation:** `internal/mount/` package assembles mount flags with collision check. Go `text/template` generates agent instruction file (CLAUDE.md/GEMINI.md/CODEX.md) with repo list. Instruction file mounted into container at agent's expected config location.
 - **Affects:** `internal/mount/` (mount assembly + collision detection), `embed/agent-instructions.md` (Go template), `cmd/run.go` (mount + instruction generation)
 
 ### Host Agent Config (`host_agent_config`)
@@ -284,6 +284,7 @@ asbox/
 - **Agent config registry:** Maps each agent to its default host config directory, container target, and environment variable:
   - `claude`: `~/.claude` -> `/opt/claude-config`, `CLAUDE_CONFIG_DIR`
   - `gemini`: `~/.gemini` -> `/opt/gemini-config`, `GEMINI_CONFIG_DIR`
+  - `codex`: `~/.codex` -> `/opt/codex-config`, `CODEX_HOME`
 - **Rationale:** Enables OAuth token synchronization — agent can read and refresh tokens without re-authentication. Automatic path resolution eliminates manual config when switching agents via `--agent`. This is the widest trust grant in the system but is clearly visible (enabled by default, explicitly disableable).
 - **Silent skip:** If the host config directory does not exist (agent not set up on host), the mount is silently skipped — no error. This supports multi-agent images where not all agents are configured on the host.
 - **Known limitation (Phase 2):** No integrity checking — an agent with write access could modify configuration that persists after the sandbox exits. Future enhancement: snapshot config directory state on startup for post-session diff.
@@ -482,7 +483,7 @@ asbox/
 │   ├── entrypoint.sh               # Container entrypoint — UID/GID, MCP merge, poller, Podman socket, exec
 │   ├── git-wrapper.sh              # Git push interceptor — blocks push, passes all else to /usr/bin/git
 │   ├── healthcheck-poller.sh       # Healthcheck daemon — polls every 10s, trap-and-restart loop
-│   ├── agent-instructions.md.tmpl  # Go template for CLAUDE.md/GEMINI.md with bmad_repos list
+│   ├── agent-instructions.md.tmpl  # Go template for CLAUDE.md/GEMINI.md/CODEX.md with bmad_repos list
 │   └── config.yaml                 # Starter config for asbox init — sensible defaults, inline comments
 ├── integration/                     # Integration tests (testcontainers-go)
 │   ├── integration_test.go          # Test setup, shared helpers, testcontainers config
@@ -589,7 +590,7 @@ var Assets embed.FS
                                               └──────┼──────┘
                                                      │
                                                      ▼
-                                              exec agent (claude/gemini)
+                                              exec agent (claude/gemini/codex)
 ```
 
 ### Requirements to Structure Mapping
@@ -655,7 +656,7 @@ var Assets embed.FS
 ### Gap Analysis & Resolutions
 
 **Gap 1: Agent instruction file dual use (FR44 vs FR53)**
-- FR44: Static agent instruction file (`CLAUDE.md`/`GEMINI.md`) baked into image at build time with sandbox-specific constraints
+- FR44: Static agent instruction file (`CLAUDE.md`/`GEMINI.md`/`CODEX.md`) baked into image at build time with sandbox-specific constraints
 - FR53: Dynamically generated agent instruction file mounted at runtime when `bmad_repos` is configured, containing repo list and multi-repo workflow instructions
 - Resolution: When bmad_repos is active, the runtime-generated file takes precedence (mounted over the build-time file at the same path). When bmad_repos is not configured, the build-time file is used as-is. Agents should understand these are two separate mechanisms.
 
