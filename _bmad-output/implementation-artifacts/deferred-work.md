@@ -117,3 +117,12 @@
 ## Deferred from: code review of 1-9-multi-agent-runtime-support (2026-04-11)
 
 - No cmd-level tests for `--agent` flag path — the `--agent` override wiring in `cmd/run.go` RunE is untested at command level. Unit validators are tested separately. Story 9-5 is explicitly planned to cover multi-agent config and flag tests. [cmd/run_test.go]
+
+## Deferred from: code review of 1-10-codex-agent-support (2026-04-14)
+
+- bmad_repos instruction mount only targets default agent — non-default agents retain generic build-time instructions without repo path information. Pre-existing design limitation widened by third agent. [cmd/run.go:81-92]
+- Mutable global `AgentConfigRegistry` in tests risks data races if `t.Parallel()` is added — tests mutate package-level map and restore in t.Cleanup. Currently safe. Pre-existing pattern. [internal/mount/mount_test.go:245-277]
+- Node.js SDK validation checks not consolidated — separate if-blocks per agent for nodejs requirement. Grows with each npm-based agent. [internal/config/parse.go:109-117]
+- npm install with no version pinning for @openai/codex — installs latest at build time. Same pre-existing pattern as gemini. [embed/Dockerfile.tmpl:92]
+- Hardcoded supported-agent lists in error messages need manual maintenance — agent list appears as literal strings in agentCommand, ValidateAgent, and --agent flag help text. [multiple files]
+- `AGENT_CMD` via `bash -c` string expansion is fragile pattern — pre-existing for all agents. [embed/entrypoint.sh]

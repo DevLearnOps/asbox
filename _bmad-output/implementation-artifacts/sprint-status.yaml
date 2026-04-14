@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: "2026-04-08"
-last_updated: "2026-04-14"  # sprint change: codex agent support
+last_updated: "2026-04-14"  # done: codex agent support
 
 
 
@@ -56,7 +56,7 @@ development_status:
   1-7-sandbox-run-with-tty-and-lifecycle: done
   1-8-configuration-initialization: done
   1-9-multi-agent-runtime-support: done  # sprint change 2026-04-11: installed_agents, default_agent, --agent flag, short names, boolean host_agent_config
-  1-10-codex-agent-support: backlog  # sprint change 2026-04-14: codex agent installation, config registry, command mapping, host_agent_config, instruction file
+  1-10-codex-agent-support: done  # sprint change 2026-04-14: codex agent installation, config registry, command mapping, host_agent_config, instruction file
   epic-1-retrospective: optional
 
   # Epic 2: Agent Can Work With Project Files and Git

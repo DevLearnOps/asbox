@@ -33,6 +33,7 @@ type AgentConfigMapping struct {
 var AgentConfigRegistry = map[string]AgentConfigMapping{
 	"claude": {Source: "~/.claude", Target: "/opt/claude-config", EnvVar: "CLAUDE_CONFIG_DIR", EnvVal: "/opt/claude-config"},
 	"gemini": {Source: "~/.gemini", Target: "/opt/gemini-home/.gemini", EnvVar: "GEMINI_CLI_HOME", EnvVal: "/opt/gemini-home"},
+	"codex":  {Source: "~/.codex", Target: "/opt/codex-config", EnvVar: "CODEX_HOME", EnvVal: "/opt/codex-config"},
 }
 
 // Config represents the top-level asbox configuration.

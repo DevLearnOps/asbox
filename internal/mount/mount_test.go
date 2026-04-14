@@ -235,6 +235,56 @@ func TestAssembleHostAgentConfig_unknownAgent(t *testing.T) {
 	}
 }
 
+func TestAssembleHostAgentConfig_codexWithExistingDir(t *testing.T) {
+	dir := t.TempDir()
+	codexDir := filepath.Join(dir, ".codex")
+	if err := os.Mkdir(codexDir, 0o755); err != nil {
+		t.Fatalf("failed to create test dir: %v", err)
+	}
+
+	origMapping := config.AgentConfigRegistry["codex"]
+	config.AgentConfigRegistry["codex"] = config.AgentConfigMapping{
+		Source: codexDir,
+		Target: "/opt/codex-config",
+		EnvVar: "CODEX_HOME",
+		EnvVal: "/opt/codex-config",
+	}
+	t.Cleanup(func() { config.AgentConfigRegistry["codex"] = origMapping })
+
+	mountFlag, envKey, envVal, err := AssembleHostAgentConfig("codex", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if mountFlag != codexDir+":/opt/codex-config" {
+		t.Errorf("mountFlag = %q, want %q", mountFlag, codexDir+":/opt/codex-config")
+	}
+	if envKey != "CODEX_HOME" {
+		t.Errorf("envKey = %q, want %q", envKey, "CODEX_HOME")
+	}
+	if envVal != "/opt/codex-config" {
+		t.Errorf("envVal = %q, want %q", envVal, "/opt/codex-config")
+	}
+}
+
+func TestAssembleHostAgentConfig_codexMissingDirSilentSkip(t *testing.T) {
+	origMapping := config.AgentConfigRegistry["codex"]
+	config.AgentConfigRegistry["codex"] = config.AgentConfigMapping{
+		Source: "/nonexistent/codex/dir",
+		Target: "/opt/codex-config",
+		EnvVar: "CODEX_HOME",
+		EnvVal: "/opt/codex-config",
+	}
+	t.Cleanup(func() { config.AgentConfigRegistry["codex"] = origMapping })
+
+	mountFlag, envKey, envVal, err := AssembleHostAgentConfig("codex", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if mountFlag != "" || envKey != "" || envVal != "" {
+		t.Errorf("expected empty results for missing codex dir, got mount=%q env=%q val=%q", mountFlag, envKey, envVal)
+	}
+}
+
 func TestAssembleHostAgentConfig_sourceIsFile(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "not-a-dir")

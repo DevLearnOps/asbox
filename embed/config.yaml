@@ -6,6 +6,7 @@
 installed_agents:
   - claude
   # - gemini
+  # - codex
 
 # Default agent to launch (defaults to first in installed_agents if omitted)
 # default_agent: claude
@@ -52,7 +53,7 @@ env:
 #   - playwright
 
 # Mount host agent config directory into sandbox for OAuth/SSO token sync
-# Automatically resolves paths per agent (claude: ~/.claude, gemini: ~/.gemini)
+# Automatically resolves paths per agent (claude: ~/.claude, gemini: ~/.gemini, codex: ~/.codex)
 # Set to false to disable
 # host_agent_config: false
 

@@ -296,7 +296,7 @@ func TestParse_invalidAgentName(t *testing.T) {
 	if ce.Field != "agent" {
 		t.Errorf("Field = %q, want %q", ce.Field, "agent")
 	}
-	if ce.Msg != "unsupported agent 'chatgpt'. Use 'claude' or 'gemini'" {
+	if ce.Msg != "unsupported agent 'chatgpt'. Use 'claude', 'gemini', or 'codex'" {
 		t.Errorf("Msg = %q", ce.Msg)
 	}
 }
@@ -314,7 +314,7 @@ func TestParse_oldAgentNameRejected(t *testing.T) {
 	if !errors.As(err, &ce) {
 		t.Fatalf("expected *ConfigError, got %T: %v", err, err)
 	}
-	if ce.Msg != "unsupported agent 'claude-code'. Use 'claude' or 'gemini'" {
+	if ce.Msg != "unsupported agent 'claude-code'. Use 'claude', 'gemini', or 'codex'" {
 		t.Errorf("Msg = %q", ce.Msg)
 	}
 }
@@ -702,6 +702,9 @@ func TestValidateAgent_valid(t *testing.T) {
 	if err := ValidateAgent("gemini"); err != nil {
 		t.Errorf("unexpected error for gemini: %v", err)
 	}
+	if err := ValidateAgent("codex"); err != nil {
+		t.Errorf("unexpected error for codex: %v", err)
+	}
 }
 
 func TestValidateAgent_invalid(t *testing.T) {
@@ -714,7 +717,7 @@ func TestValidateAgent_invalid(t *testing.T) {
 	if !errors.As(err, &ce) {
 		t.Fatalf("expected *ConfigError, got %T: %v", err, err)
 	}
-	if ce.Msg != "unsupported agent 'claude-code'. Use 'claude' or 'gemini'" {
+	if ce.Msg != "unsupported agent 'claude-code'. Use 'claude', 'gemini', or 'codex'" {
 		t.Errorf("Msg = %q", ce.Msg)
 	}
 }
@@ -737,5 +740,74 @@ func TestValidateAgentInstalled_notInstalled(t *testing.T) {
 	}
 	if ce.Msg != "agent 'gemini' is not installed in the image. Installed agents: claude. Add it to installed_agents in config or choose a different agent" {
 		t.Errorf("Msg = %q", ce.Msg)
+	}
+}
+
+func TestParse_codexInValidAgents(t *testing.T) {
+	dir := t.TempDir()
+	cfg := writeConfig(t, dir, `
+installed_agents: [codex]
+sdks:
+  nodejs: "22"
+`)
+
+	parsed, err := Parse(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(parsed.InstalledAgents) != 1 || parsed.InstalledAgents[0] != "codex" {
+		t.Errorf("InstalledAgents = %v, want [codex]", parsed.InstalledAgents)
+	}
+	if parsed.DefaultAgent != "codex" {
+		t.Errorf("DefaultAgent = %q, want %q", parsed.DefaultAgent, "codex")
+	}
+}
+
+func TestParse_codexRequiresNodejs(t *testing.T) {
+	dir := t.TempDir()
+	cfg := writeConfig(t, dir, `installed_agents: [codex]`)
+
+	_, err := Parse(cfg)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	var ce *ConfigError
+	if !errors.As(err, &ce) {
+		t.Fatalf("expected *ConfigError, got %T: %v", err, err)
+	}
+	if ce.Field != "installed_agents" {
+		t.Errorf("Field = %q, want %q", ce.Field, "installed_agents")
+	}
+	if ce.Msg != "agent 'codex' requires sdks.nodejs to be configured" {
+		t.Errorf("Msg = %q", ce.Msg)
+	}
+}
+
+func TestParse_codexInMultiAgentConfig(t *testing.T) {
+	dir := t.TempDir()
+	cfg := writeConfig(t, dir, `
+installed_agents:
+  - claude
+  - gemini
+  - codex
+default_agent: codex
+sdks:
+  nodejs: "22"
+`)
+
+	parsed, err := Parse(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(parsed.InstalledAgents) != 3 {
+		t.Fatalf("InstalledAgents length = %d, want 3", len(parsed.InstalledAgents))
+	}
+	if parsed.InstalledAgents[2] != "codex" {
+		t.Errorf("InstalledAgents[2] = %q, want %q", parsed.InstalledAgents[2], "codex")
+	}
+	if parsed.DefaultAgent != "codex" {
+		t.Errorf("DefaultAgent = %q, want %q", parsed.DefaultAgent, "codex")
 	}
 }

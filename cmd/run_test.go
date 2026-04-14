@@ -195,8 +195,35 @@ func TestAgentCommand_gemini(t *testing.T) {
 	}
 }
 
+func TestAgentCommand_codex(t *testing.T) {
+	cmd, err := agentCommand("codex")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cmd != "codex --dangerously-bypass-approvals-and-sandbox --instructions /home/sandbox/CODEX.md" {
+		t.Errorf("agentCommand(codex) = %q, want %q", cmd, "codex --dangerously-bypass-approvals-and-sandbox --instructions /home/sandbox/CODEX.md")
+	}
+}
+
 func TestAgentCommand_unknown(t *testing.T) {
 	_, err := agentCommand("chatgpt")
+	if err == nil {
+		t.Fatal("expected error for unknown agent, got nil")
+	}
+}
+
+func TestAgentInstructionTarget_codex(t *testing.T) {
+	target, err := agentInstructionTarget("codex")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if target != "/home/sandbox/CODEX.md" {
+		t.Errorf("agentInstructionTarget(codex) = %q, want %q", target, "/home/sandbox/CODEX.md")
+	}
+}
+
+func TestAgentInstructionTarget_unknown(t *testing.T) {
+	_, err := agentInstructionTarget("chatgpt")
 	if err == nil {
 		t.Fatal("expected error for unknown agent, got nil")
 	}

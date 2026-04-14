@@ -88,6 +88,11 @@ USER root
 RUN npm install -g @google/gemini-cli && \
     chown -R sandbox:sandbox /home/sandbox/.npm-global
 {{- end}}
+{{- if eq . "codex"}}
+
+RUN npm install -g @openai/codex && \
+    chown -R sandbox:sandbox /home/sandbox/.npm-global
+{{- end}}
 {{- end}}
 {{- if .InstalledAgents}}
 
@@ -98,6 +103,9 @@ RUN cp /tmp/agent-instructions.md /home/sandbox/CLAUDE.md && chown sandbox:sandb
 {{- end}}
 {{- if eq . "gemini"}}
 RUN cp /tmp/agent-instructions.md /home/sandbox/GEMINI.md && chown sandbox:sandbox /home/sandbox/GEMINI.md
+{{- end}}
+{{- if eq . "codex"}}
+RUN cp /tmp/agent-instructions.md /home/sandbox/CODEX.md && chown sandbox:sandbox /home/sandbox/CODEX.md
 {{- end}}
 {{- end}}
 RUN rm -f /tmp/agent-instructions.md

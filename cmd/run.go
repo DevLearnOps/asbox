@@ -78,14 +78,9 @@ var runCmd = &cobra.Command{
 			}
 			tmpFile.Close()
 
-			var instructionTarget string
-			switch cfg.DefaultAgent {
-			case "claude":
-				instructionTarget = "/home/sandbox/CLAUDE.md"
-			case "gemini":
-				instructionTarget = "/home/sandbox/GEMINI.md"
-			default:
-				return fmt.Errorf("bmad_repos: unsupported agent %q for instruction file mount", cfg.DefaultAgent)
+			instructionTarget, err := agentInstructionTarget(cfg.DefaultAgent)
+			if err != nil {
+				return err
 			}
 			mountFlags = append(mountFlags, tmpFile.Name()+":"+instructionTarget)
 		}
@@ -177,13 +172,28 @@ func agentCommand(agent string) (string, error) {
 		return "claude --dangerously-skip-permissions", nil
 	case "gemini":
 		return "gemini -y", nil
+	case "codex":
+		return "codex --dangerously-bypass-approvals-and-sandbox --instructions /home/sandbox/CODEX.md", nil
 	default:
-		return "", fmt.Errorf("unknown agent %q: supported agents are claude, gemini", agent)
+		return "", fmt.Errorf("unknown agent %q: supported agents are claude, gemini, codex", agent)
+	}
+}
+
+func agentInstructionTarget(agent string) (string, error) {
+	switch agent {
+	case "claude":
+		return "/home/sandbox/CLAUDE.md", nil
+	case "gemini":
+		return "/home/sandbox/GEMINI.md", nil
+	case "codex":
+		return "/home/sandbox/CODEX.md", nil
+	default:
+		return "", fmt.Errorf("bmad_repos: unsupported agent %q for instruction file mount", agent)
 	}
 }
 
 func init() {
 	runCmd.Flags().Bool("no-cache", false, "Force a complete rebuild, bypassing content-hash check and Docker layer cache")
-	runCmd.Flags().String("agent", "", "Override default agent for this session (e.g., claude, gemini)")
+	runCmd.Flags().String("agent", "", "Override default agent for this session (e.g., claude, gemini, codex)")
 	rootCmd.AddCommand(runCmd)
 }

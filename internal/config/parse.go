@@ -15,6 +15,7 @@ import (
 var validAgents = map[string]bool{
 	"claude": true,
 	"gemini": true,
+	"codex":  true,
 }
 
 var sanitizeRe = regexp.MustCompile(`[^a-z0-9-]+`)
@@ -108,6 +109,12 @@ func Parse(configPath string) (*Config, error) {
 			Msg:   "agent 'gemini' requires sdks.nodejs to be configured",
 		}
 	}
+	if slices.Contains(cfg.InstalledAgents, "codex") && cfg.SDKs.NodeJS == "" {
+		return nil, &ConfigError{
+			Field: "installed_agents",
+			Msg:   "agent 'codex' requires sdks.nodejs to be configured",
+		}
+	}
 
 	// Validate mounts
 	for i, m := range cfg.Mounts {
@@ -179,7 +186,7 @@ func resolvePath(baseDir, p string) string {
 // ValidateAgent checks that an agent name is a supported short name.
 func ValidateAgent(agent string) error {
 	if !validAgents[agent] {
-		return &ConfigError{Field: "agent", Msg: fmt.Sprintf("unsupported agent '%s'. Use 'claude' or 'gemini'", agent)}
+		return &ConfigError{Field: "agent", Msg: fmt.Sprintf("unsupported agent '%s'. Use 'claude', 'gemini', or 'codex'", agent)}
 	}
 	return nil
 }
