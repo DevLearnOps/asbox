@@ -58,6 +58,11 @@ Last updated: 2026-04-15 (full project retrospective)
 - **No binary invocation test for CLI-level name generation** — No test exercises the `asbox run` binary to verify it produces suffixed container names. CLAUDE.md recommends binary invocation tests for CLI-level features. Nice-to-have coverage improvement.
 - **Project names with uppercase/underscores not validated** — `cfg.ProjectName` can contain characters outside the `[a-z0-9-]` charset assumed by the container name pattern regex. Pre-existing; story 11-2 will address input sanitization.
 
+## Deferred from: code review of story 11-2 (2026-04-16)
+
+- **Apt release pinning with `/` rejected by package regex** — `packageNameRe` does not include `/`, so release-pinned apt syntax like `vim/jammy-backports` is rejected. Valid but niche; can be added if a user requests it. [internal/config/parse.go:23]
+- **Apt tilde `~` versions rejected by package regex** — Debian version strings can contain `~` for pre-release sorting (e.g., `1.0~beta1`). Uncommon in practice for direct package installs; can be added if needed. [internal/config/parse.go:23]
+
 ## Integration Test Quality
 
 - **`execInContainer` missing `tcexec.Multiplexed()`** — Returns raw Docker multiplexed stream with binary framing. Callers compensate with `strings.Contains`. [integration/integration_test.go:108] _(story 9-1)_

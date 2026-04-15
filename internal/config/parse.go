@@ -20,6 +20,8 @@ var validAgents = map[string]bool{
 
 var sanitizeRe = regexp.MustCompile(`[^a-z0-9-]+`)
 var collapseHyphens = regexp.MustCompile(`-{2,}`)
+var sdkVersionRe = regexp.MustCompile(`^[0-9a-zA-Z.\-+]+$`)
+var packageNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9.\-+=:]*$`)
 
 // Parse reads, unmarshals, validates, and resolves a config file.
 func Parse(configPath string) (*Config, error) {
@@ -116,6 +118,28 @@ func Parse(configPath string) (*Config, error) {
 		}
 	}
 
+	for _, sdk := range []struct {
+		field   string
+		version string
+	}{
+		{"sdks.nodejs", cfg.SDKs.NodeJS},
+		{"sdks.go", cfg.SDKs.Go},
+		{"sdks.python", cfg.SDKs.Python},
+	} {
+		if sdk.version == "" {
+			continue
+		}
+		if err := validateSDKVersion(sdk.field, sdk.version); err != nil {
+			return nil, err
+		}
+	}
+
+	for i, pkg := range cfg.Packages {
+		if err := validatePackageName(i, pkg); err != nil {
+			return nil, err
+		}
+	}
+
 	// Validate mounts
 	for i, m := range cfg.Mounts {
 		if m.Source == "" {
@@ -150,10 +174,11 @@ func Parse(configPath string) (*Config, error) {
 		// Parent directory of the config file's directory
 		// e.g. for .asbox/config.yaml, configDir is <project>/.asbox, parent is <project>
 		parentDir := filepath.Dir(configDir)
-		cfg.ProjectName = sanitizeProjectName(filepath.Base(parentDir))
-		if cfg.ProjectName == "" {
-			cfg.ProjectName = "asbox"
-		}
+		cfg.ProjectName = filepath.Base(parentDir)
+	}
+	cfg.ProjectName = sanitizeProjectName(cfg.ProjectName)
+	if cfg.ProjectName == "" {
+		cfg.ProjectName = "asbox"
 	}
 
 	// Resolve mount paths relative to config file directory
@@ -209,4 +234,31 @@ func sanitizeProjectName(name string) string {
 	name = collapseHyphens.ReplaceAllString(name, "-")
 	name = strings.Trim(name, "-")
 	return name
+}
+
+func validateSDKVersion(field, version string) error {
+	if sdkVersionRe.MatchString(version) {
+		return nil
+	}
+	return &ConfigError{
+		Field: field,
+		Msg:   fmt.Sprintf("contains invalid characters %q. Allowed: letters, digits, dots, hyphens, plus signs", version),
+	}
+}
+
+func validatePackageName(index int, pkg string) error {
+	field := fmt.Sprintf("packages[%d]", index)
+	if pkg == "" {
+		return &ConfigError{
+			Field: field,
+			Msg:   "package name cannot be empty. Allowed: alphanumeric, hyphens, dots, plus signs, equals signs, colons (apt format)",
+		}
+	}
+	if packageNameRe.MatchString(pkg) {
+		return nil
+	}
+	return &ConfigError{
+		Field: field,
+		Msg:   fmt.Sprintf("contains invalid characters %q. Allowed: alphanumeric, hyphens, dots, plus signs, equals signs, colons (apt format)", pkg),
+	}
 }

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -579,6 +580,156 @@ func TestParse_projectNameFallback(t *testing.T) {
 
 	if parsed.ProjectName != "asbox" {
 		t.Errorf("ProjectName = %q, want %q", parsed.ProjectName, "asbox")
+	}
+}
+
+func TestParse_sdkVersionValidation(t *testing.T) {
+	tests := []struct {
+		name      string
+		sdkField  string
+		value     string
+		wantField string
+		wantMsg   string
+		wantErr   bool
+	}{
+		{name: "nodejs numeric", sdkField: "nodejs", value: "22"},
+		{name: "nodejs dotted", sdkField: "nodejs", value: "22.13.0"},
+		{name: "go semver", sdkField: "go", value: "1.23.1"},
+		{name: "python dotted", sdkField: "python", value: "3.12"},
+		{name: "nodejs rc", sdkField: "nodejs", value: "22-rc1"},
+		{name: "go build metadata", sdkField: "go", value: "1.23+build.1"},
+		{name: "nodejs shell metacharacters", sdkField: "nodejs", value: "22; rm -rf /", wantField: "sdks.nodejs", wantMsg: `contains invalid characters "22; rm -rf /". Allowed: letters, digits, dots, hyphens, plus signs`, wantErr: true},
+		{name: "go command substitution", sdkField: "go", value: "1.23$(curl evil)", wantField: "sdks.go", wantMsg: `contains invalid characters "1.23$(curl evil)". Allowed: letters, digits, dots, hyphens, plus signs`, wantErr: true},
+		{name: "python newline injection", sdkField: "python", value: "3.12\nRUN evil", wantField: "sdks.python", wantMsg: "contains invalid characters", wantErr: true},
+		{name: "nodejs trailing space", sdkField: "nodejs", value: "22 ", wantField: "sdks.nodejs", wantMsg: `contains invalid characters "22 ". Allowed: letters, digits, dots, hyphens, plus signs`, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			cfg := writeConfig(t, dir, `
+installed_agents: [claude]
+sdks:
+  `+tt.sdkField+`: "`+tt.value+`"
+`)
+
+			parsed, err := Parse(cfg)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+
+				var ce *ConfigError
+				if !errors.As(err, &ce) {
+					t.Fatalf("expected *ConfigError, got %T: %v", err, err)
+				}
+				if ce.Field != tt.wantField {
+					t.Errorf("Field = %q, want %q", ce.Field, tt.wantField)
+				}
+				if tt.wantMsg != "" && !strings.Contains(ce.Msg, tt.wantMsg) {
+					t.Errorf("Msg = %q, want substring %q", ce.Msg, tt.wantMsg)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if parsed == nil {
+				t.Fatal("parsed config is nil")
+			}
+		})
+	}
+}
+
+func TestParse_packageNameValidation(t *testing.T) {
+	tests := []struct {
+		name      string
+		value     string
+		wantField string
+		wantMsg   string
+		wantErr   bool
+	}{
+		{name: "simple package", value: "vim"},
+		{name: "hyphenated package", value: "build-essential"},
+		{name: "library package", value: "libpq-dev"},
+		{name: "dotted package", value: "python3.12-venv"},
+		{name: "plus signs", value: "lib++-dev"},
+		{name: "epoch prefix", value: "5:vim"},
+		{name: "version pinned", value: "vim=2:8.2.3995-1ubuntu2.22"},
+		{name: "empty package", value: "", wantField: "packages[0]", wantMsg: "package name cannot be empty. Allowed: alphanumeric, hyphens, dots, plus signs, equals signs, colons (apt format)", wantErr: true},
+		{name: "shell metacharacters", value: "vim; curl evil", wantField: "packages[0]", wantMsg: `contains invalid characters "vim; curl evil". Allowed: alphanumeric, hyphens, dots, plus signs, equals signs, colons (apt format)`, wantErr: true},
+		{name: "leading hyphen", value: "-invalid", wantField: "packages[0]", wantMsg: `contains invalid characters "-invalid". Allowed: alphanumeric, hyphens, dots, plus signs, equals signs, colons (apt format)`, wantErr: true},
+		{name: "leading dot", value: ".invalid", wantField: "packages[0]", wantMsg: `contains invalid characters ".invalid". Allowed: alphanumeric, hyphens, dots, plus signs, equals signs, colons (apt format)`, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			cfg := writeConfig(t, dir, `
+installed_agents: [claude]
+packages:
+  - "`+tt.value+`"
+`)
+
+			parsed, err := Parse(cfg)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+
+				var ce *ConfigError
+				if !errors.As(err, &ce) {
+					t.Fatalf("expected *ConfigError, got %T: %v", err, err)
+				}
+				if ce.Field != tt.wantField {
+					t.Errorf("Field = %q, want %q", ce.Field, tt.wantField)
+				}
+				if tt.wantMsg != "" && !strings.Contains(ce.Msg, tt.wantMsg) {
+					t.Errorf("Msg = %q, want substring %q", ce.Msg, tt.wantMsg)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(parsed.Packages) != 1 || parsed.Packages[0] != tt.value {
+				t.Errorf("Packages = %v, want [%s]", parsed.Packages, tt.value)
+			}
+		})
+	}
+}
+
+func TestParse_explicitProjectNameSanitized(t *testing.T) {
+	tests := []struct {
+		name     string
+		value    string
+		wantName string
+	}{
+		{name: "already sanitized", value: "my-project", wantName: "my-project"},
+		{name: "uppercase and underscore", value: "My_Project", wantName: "my-project"},
+		{name: "spaces and punctuation", value: "PROJECT 123!", wantName: "project-123"},
+		{name: "leading and trailing hyphens", value: "---leading---", wantName: "leading"},
+		{name: "sanitizes to empty", value: "!!!", wantName: "asbox"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			cfg := writeConfig(t, dir, `
+installed_agents: [claude]
+project_name: "`+tt.value+`"
+`)
+
+			parsed, err := Parse(cfg)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if parsed.ProjectName != tt.wantName {
+				t.Errorf("ProjectName = %q, want %q", parsed.ProjectName, tt.wantName)
+			}
+		})
 	}
 }
 
