@@ -52,6 +52,12 @@ Last updated: 2026-04-15 (full project retrospective)
 - **`setup_codex_home()` untested at integration level** — Symlink logic verified only by inspection; CI constraints justify deferral. [embed/entrypoint.sh] _(story 9-6)_
 - **No test for claude/gemini in `agentInstructionTarget()`** — Pre-existing paths moved without behavior change. [cmd/run_test.go] _(story 9-6)_
 
+## Deferred from: code review of story 11-1 (2026-04-15)
+
+- **`TestRunContainerNameMatchesPattern` doesn't exercise production code path** — Test manually constructs the container name instead of exercising the actual `runCmd` code path. Fix approach debatable (refactor container name construction into testable function vs binary invocation test). [cmd/run_test.go:199-205]
+- **No binary invocation test for CLI-level name generation** — No test exercises the `asbox run` binary to verify it produces suffixed container names. CLAUDE.md recommends binary invocation tests for CLI-level features. Nice-to-have coverage improvement.
+- **Project names with uppercase/underscores not validated** — `cfg.ProjectName` can contain characters outside the `[a-z0-9-]` charset assumed by the container name pattern regex. Pre-existing; story 11-2 will address input sanitization.
+
 ## Integration Test Quality
 
 - **`execInContainer` missing `tcexec.Multiplexed()`** — Returns raw Docker multiplexed stream with binary framing. Callers compensate with `strings.Contains`. [integration/integration_test.go:108] _(story 9-1)_

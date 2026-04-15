@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"testing"
 
@@ -172,6 +173,35 @@ mounts:
 	want := "mount source '" + resolved + "' not found (resolved to " + resolved + "). Check mounts in .asbox/config.yaml"
 	if err.Error() != want {
 		t.Errorf("error = %q, want %q", err.Error(), want)
+	}
+}
+
+func TestRandomSuffix(t *testing.T) {
+	pattern := regexp.MustCompile(`^[0-9a-f]{6}$`)
+
+	first := randomSuffix()
+	second := randomSuffix()
+
+	for _, suffix := range []string{first, second} {
+		if len(suffix) != 6 {
+			t.Fatalf("randomSuffix() length = %d, want 6", len(suffix))
+		}
+		if !pattern.MatchString(suffix) {
+			t.Fatalf("randomSuffix() = %q, want lowercase hex", suffix)
+		}
+	}
+
+	if first == second {
+		t.Fatal("randomSuffix() produced duplicate consecutive values")
+	}
+}
+
+func TestRunContainerNameMatchesPattern(t *testing.T) {
+	name := "asbox-my-app-" + randomSuffix()
+	pattern := regexp.MustCompile(`^asbox-[a-z0-9-]+-[0-9a-f]{6}$`)
+
+	if !pattern.MatchString(name) {
+		t.Fatalf("container name %q does not match expected pattern", name)
 	}
 }
 

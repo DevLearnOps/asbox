@@ -9,7 +9,7 @@ import (
 func TestRunCmdArgs_basicFlags(t *testing.T) {
 	opts := RunOptions{
 		ImageRef:      "asbox-myapp:abc123",
-		ContainerName: "asbox-myapp",
+		ContainerName: "asbox-myapp-a1b2c3",
 	}
 	args := runCmdArgs(opts)
 
@@ -46,8 +46,8 @@ func TestRunCmdArgs_basicFlags(t *testing.T) {
 		t.Errorf("expected last arg to be image ref, got %q", args[len(args)-1])
 	}
 
-	// Must contain --name
-	if !strings.Contains(joined, "--name asbox-myapp") {
+	// Must contain --name with exact value
+	if !strings.Contains(joined, "--name asbox-myapp-a1b2c3") {
 		t.Errorf("expected --name flag, got %v", args)
 	}
 }
@@ -147,7 +147,7 @@ func TestRunCmdArgs_emptyEnvValue(t *testing.T) {
 func TestRunCmdArgs_fullOptions(t *testing.T) {
 	opts := RunOptions{
 		ImageRef:      "asbox-myproject:a1b2c3",
-		ContainerName: "asbox-myproject",
+		ContainerName: "asbox-myproject-a1b2c3",
 		EnvVars: map[string]string{
 			"HOST_UID": "1000",
 			"HOST_GID": "1000",
@@ -167,7 +167,7 @@ func TestRunCmdArgs_fullOptions(t *testing.T) {
 		"--security-opt seccomp=unconfined",
 		"--security-opt apparmor=unconfined",
 		"--security-opt label=disable",
-		"--name asbox-myproject",
+		"--name asbox-myproject-a1b2c3",
 		"-v /src:/workspace",
 		"asbox-myproject:a1b2c3",
 	}

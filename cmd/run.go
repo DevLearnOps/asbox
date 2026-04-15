@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	crand "crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"maps"
 	"os"
@@ -121,7 +123,7 @@ var runCmd = &cobra.Command{
 			return err
 		}
 
-		containerName := "asbox-" + cfg.ProjectName
+		containerName := "asbox-" + cfg.ProjectName + "-" + randomSuffix()
 
 		fmt.Fprintf(cmd.OutOrStdout(), "launching sandbox %s...\n", containerName)
 
@@ -164,6 +166,14 @@ func buildEnvVars(cfg *config.Config) (map[string]string, error) {
 	envVars["HOST_GID"] = strconv.Itoa(os.Getgid())
 
 	return envVars, nil
+}
+
+func randomSuffix() string {
+	b := make([]byte, 3)
+	if _, err := crand.Read(b); err != nil {
+		panic("crypto/rand failed: " + err.Error())
+	}
+	return hex.EncodeToString(b)
 }
 
 // agentCommand maps the configured agent name to the shell command the

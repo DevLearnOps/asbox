@@ -10,7 +10,7 @@ import (
 // RunOptions holds the parameters for running a Docker container.
 type RunOptions struct {
 	ImageRef      string            // e.g., "asbox-myapp:a1b2c3d4e5f6"
-	ContainerName string            // e.g., "asbox-myapp"
+	ContainerName string            // e.g., "asbox-myapp-a1b2c3"
 	EnvVars       map[string]string // HOST_UID, HOST_GID, secrets, custom env
 	Mounts        []string          // mount flags for later stories (e.g., "-v source:target")
 	Stdin         io.Reader         // os.Stdin for interactive TTY

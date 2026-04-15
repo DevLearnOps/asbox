@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: "2026-04-08"
-last_updated: "2026-04-15"  # full project retrospective completed
+last_updated: "2026-04-16"  # story 11-1 code review completed
 
 
 
@@ -110,3 +110,13 @@ development_status:
   epic-10: done
   10-1-remove-bash-sandbox-files-and-update-readme: done
   epic-10-retrospective: done  # full project retro 2026-04-15
+
+  # Epic 11: Hardening for Production Readiness
+  epic-11: in-progress
+  11-1-concurrent-sandbox-sessions: done
+  11-2-sdk-package-and-project-name-sanitization: backlog
+  11-3-env-key-value-validation: backlog
+  11-4-non-tty-runtime-support: backlog
+  11-5-pinned-build-dependencies: backlog
+  11-6-agent-command-injection-hardening: backlog
+  epic-11-retrospective: optional

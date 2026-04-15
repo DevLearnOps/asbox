@@ -1,6 +1,7 @@
 .mcp.json
 
 _bmad/
+.agents/
 .claude/
 .gemini/
 

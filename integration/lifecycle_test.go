@@ -92,6 +92,73 @@ func TestContainer_stopsCleanly(t *testing.T) {
 	})
 }
 
+func TestContainer_concurrentSessionsCleanup(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	t.Run("distinct_names_run_concurrently_and_cleanup", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+
+		image := buildTestImage(t)
+		names := []string{
+			"asbox-integration-test-a1b2c3",
+			"asbox-integration-test-d4e5f6",
+		}
+
+		for _, name := range names {
+			t.Cleanup(func() {
+				_ = exec.Command("docker", "rm", "-f", name).Run()
+			})
+
+			cmd := exec.CommandContext(ctx, "docker", "run", "-d", "--rm", "--name", name, "--entrypoint", "tail", image, "-f", "/dev/null")
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("starting container %s: %v\noutput: %s", name, err, out)
+			}
+		}
+
+		for _, name := range names {
+			cmd := exec.CommandContext(ctx, "docker", "ps", "--filter", "name=^/"+name+"$", "--format", "{{.Names}}")
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("checking running container %s: %v\noutput: %s", name, err, out)
+			}
+			if strings.TrimSpace(string(out)) != name {
+				t.Fatalf("expected running container %s, got %q", name, strings.TrimSpace(string(out)))
+			}
+		}
+
+		stopCmd := exec.CommandContext(ctx, "docker", "stop", names[0], names[1])
+		if out, err := stopCmd.CombinedOutput(); err != nil {
+			t.Fatalf("stopping concurrent containers: %v\noutput: %s", err, out)
+		}
+
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cleanupCancel()
+
+		for _, name := range names {
+			for {
+				select {
+				case <-cleanupCtx.Done():
+					t.Fatalf("container %s was not removed before timeout", name)
+				default:
+				}
+
+				err := exec.CommandContext(cleanupCtx, "docker", "inspect", name).Run()
+				if err != nil {
+					if cleanupCtx.Err() != nil {
+						t.Fatalf("container %s was not removed before timeout", name)
+					}
+					break
+				}
+
+				time.Sleep(250 * time.Millisecond)
+			}
+		}
+	})
+}
+
 func TestAutoRebuild_differentConfigProducesDifferentTag(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
