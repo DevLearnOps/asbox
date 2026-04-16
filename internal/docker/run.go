@@ -13,6 +13,7 @@ type RunOptions struct {
 	ContainerName string            // e.g., "asbox-myapp-a1b2c3"
 	EnvVars       map[string]string // HOST_UID, HOST_GID, secrets, custom env
 	Mounts        []string          // mount flags for later stories (e.g., "-v source:target")
+	AllocTTY      bool              // true = -it, false = -i only
 	Stdin         io.Reader         // os.Stdin for interactive TTY
 	Stdout        io.Writer         // os.Stdout
 	Stderr        io.Writer         // os.Stderr
@@ -20,7 +21,11 @@ type RunOptions struct {
 
 // runCmdArgs assembles the docker run command arguments.
 func runCmdArgs(opts RunOptions) []string {
-	args := []string{"run", "-it", "--rm",
+	interactiveFlag := "-i"
+	if opts.AllocTTY {
+		interactiveFlag = "-it"
+	}
+	args := []string{"run", interactiveFlag, "--rm",
 		"--cap-add", "SYS_ADMIN",
 		"--device", "/dev/net/tun",
 		"--device", "/dev/fuse",
@@ -45,7 +50,7 @@ func runCmdArgs(opts RunOptions) []string {
 	return args
 }
 
-// RunContainer launches a Docker container with interactive TTY mode.
+// RunContainer launches a Docker container in interactive mode, optionally with a TTY.
 func RunContainer(opts RunOptions) error {
 	args := runCmdArgs(opts)
 	cmd := exec.Command("docker", args...)

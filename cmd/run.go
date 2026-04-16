@@ -12,6 +12,7 @@ import (
 	"github.com/mcastellin/asbox/internal/docker"
 	"github.com/mcastellin/asbox/internal/mount"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 var runCmd = &cobra.Command{
@@ -124,6 +125,7 @@ var runCmd = &cobra.Command{
 		}
 
 		containerName := "asbox-" + cfg.ProjectName + "-" + randomSuffix()
+		isTTY := term.IsTerminal(int(os.Stdin.Fd()))
 
 		fmt.Fprintf(cmd.OutOrStdout(), "launching sandbox %s...\n", containerName)
 
@@ -132,6 +134,7 @@ var runCmd = &cobra.Command{
 			ContainerName: containerName,
 			EnvVars:       envVars,
 			Mounts:        mountFlags,
+			AllocTTY:      isTTY,
 			Stdin:         os.Stdin,
 			Stdout:        cmd.OutOrStdout(),
 			Stderr:        cmd.ErrOrStderr(),

@@ -10,6 +10,7 @@ func TestRunCmdArgs_basicFlags(t *testing.T) {
 	opts := RunOptions{
 		ImageRef:      "asbox-myapp:abc123",
 		ContainerName: "asbox-myapp-a1b2c3",
+		AllocTTY:      true,
 	}
 	args := runCmdArgs(opts)
 
@@ -55,6 +56,7 @@ func TestRunCmdArgs_basicFlags(t *testing.T) {
 func TestRunCmdArgs_noContainerName(t *testing.T) {
 	opts := RunOptions{
 		ImageRef: "asbox-test:hash123",
+		AllocTTY: true,
 	}
 	args := runCmdArgs(opts)
 	for _, a := range args {
@@ -67,6 +69,7 @@ func TestRunCmdArgs_noContainerName(t *testing.T) {
 func TestRunCmdArgs_envVars(t *testing.T) {
 	opts := RunOptions{
 		ImageRef: "asbox-test:hash123",
+		AllocTTY: true,
 		EnvVars: map[string]string{
 			"HOST_UID":          "1001",
 			"HOST_GID":          "1001",
@@ -100,6 +103,7 @@ func TestRunCmdArgs_envVars(t *testing.T) {
 func TestRunCmdArgs_mounts(t *testing.T) {
 	opts := RunOptions{
 		ImageRef: "asbox-test:hash123",
+		AllocTTY: true,
 		Mounts:   []string{"/host/path:/container/path", "/data:/data:ro"},
 	}
 	args := runCmdArgs(opts)
@@ -125,6 +129,7 @@ func TestRunCmdArgs_mounts(t *testing.T) {
 func TestRunCmdArgs_emptyEnvValue(t *testing.T) {
 	opts := RunOptions{
 		ImageRef: "asbox-test:hash123",
+		AllocTTY: true,
 		EnvVars:  map[string]string{"EMPTY_SECRET": ""},
 	}
 	args := runCmdArgs(opts)
@@ -148,6 +153,7 @@ func TestRunCmdArgs_fullOptions(t *testing.T) {
 	opts := RunOptions{
 		ImageRef:      "asbox-myproject:a1b2c3",
 		ContainerName: "asbox-myproject-a1b2c3",
+		AllocTTY:      true,
 		EnvVars: map[string]string{
 			"HOST_UID": "1000",
 			"HOST_GID": "1000",
@@ -178,6 +184,68 @@ func TestRunCmdArgs_fullOptions(t *testing.T) {
 	}
 
 	// Image ref must be the last argument
+	if args[len(args)-1] != "asbox-myproject:a1b2c3" {
+		t.Errorf("image ref must be last arg, got %q", args[len(args)-1])
+	}
+}
+
+func TestRunCmdArgs_noTTY(t *testing.T) {
+	opts := RunOptions{
+		ImageRef: "asbox-myapp:abc123",
+		AllocTTY: false,
+	}
+	args := runCmdArgs(opts)
+
+	if len(args) < 3 {
+		t.Fatalf("expected at least 3 args, got %d: %v", len(args), args)
+	}
+	if args[0] != "run" || args[1] != "-i" || args[2] != "--rm" {
+		t.Errorf("expected [run -i --rm], got %v", args[:3])
+	}
+
+	for _, arg := range args {
+		if arg == "-it" {
+			t.Fatalf("did not expect -it in non-TTY mode: %v", args)
+		}
+	}
+}
+
+func TestRunCmdArgs_noTTY_fullOptions(t *testing.T) {
+	opts := RunOptions{
+		ImageRef:      "asbox-myproject:a1b2c3",
+		ContainerName: "asbox-myproject-a1b2c3",
+		AllocTTY:      false,
+		EnvVars: map[string]string{
+			"HOST_UID": "1000",
+			"HOST_GID": "1000",
+		},
+		Mounts: []string{"/src:/workspace"},
+	}
+	args := runCmdArgs(opts)
+
+	joined := strings.Join(args, " ")
+	checks := []string{
+		"run", "-i", "--rm",
+		"--cap-add SYS_ADMIN",
+		"--device /dev/net/tun",
+		"--device /dev/fuse",
+		"--security-opt seccomp=unconfined",
+		"--security-opt apparmor=unconfined",
+		"--security-opt label=disable",
+		"--name asbox-myproject-a1b2c3",
+		"-v /src:/workspace",
+		"asbox-myproject:a1b2c3",
+	}
+	for _, check := range checks {
+		if !strings.Contains(joined, check) {
+			t.Errorf("expected %q in args: %s", check, joined)
+		}
+	}
+	for _, arg := range args {
+		if arg == "-it" {
+			t.Fatalf("did not expect -it in non-TTY mode: %v", args)
+		}
+	}
 	if args[len(args)-1] != "asbox-myproject:a1b2c3" {
 		t.Errorf("image ref must be last arg, got %q", args[len(args)-1])
 	}
