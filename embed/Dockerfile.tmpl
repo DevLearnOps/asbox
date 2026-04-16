@@ -128,7 +128,7 @@ ENV COLORTERM=truecolor
 ENV TESTCONTAINERS_RYUK_DISABLED=true
 ENV TESTCONTAINERS_HOST_OVERRIDE=localhost
 {{- range $k, $v := .Env}}
-ENV {{$k}}="{{$v}}"
+ENV {{$k}}="{{dqescape $v}}"
 {{- end}}
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]

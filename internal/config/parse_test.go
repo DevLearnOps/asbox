@@ -701,6 +701,167 @@ packages:
 	}
 }
 
+func TestValidateEnvKey(t *testing.T) {
+	tests := []struct {
+		name      string
+		key       string
+		wantField string
+		wantMsg   string
+		wantErr   bool
+	}{
+		{name: "uppercase underscore", key: "MY_VAR"},
+		{name: "debug flag", key: "DEBUG"},
+		{name: "leading underscore", key: "_INTERNAL"},
+		{name: "single letter", key: "a"},
+		{name: "single underscore", key: "_"},
+		{name: "mixed alnum", key: "A1_B2"},
+		{name: "contains space", key: "MY VAR", wantField: "env.MY VAR", wantMsg: `invalid environment variable key "MY VAR". Keys must match shell variable format: start with letter or underscore, followed by letters, digits, or underscores`, wantErr: true},
+		{name: "starts with digit", key: "1VAR", wantField: "env.1VAR", wantMsg: `invalid environment variable key "1VAR". Keys must match shell variable format: start with letter or underscore, followed by letters, digits, or underscores`, wantErr: true},
+		{name: "empty key", key: "", wantField: "env.", wantMsg: "empty environment variable key is not allowed", wantErr: true},
+		{name: "hyphen", key: "MY-VAR", wantField: "env.MY-VAR", wantMsg: `invalid environment variable key "MY-VAR". Keys must match shell variable format: start with letter or underscore, followed by letters, digits, or underscores`, wantErr: true},
+		{name: "dot", key: "MY.VAR", wantField: "env.MY.VAR", wantMsg: `invalid environment variable key "MY.VAR". Keys must match shell variable format: start with letter or underscore, followed by letters, digits, or underscores`, wantErr: true},
+		{name: "equals", key: "FOO=BAR", wantField: "env.FOO=BAR", wantMsg: `invalid environment variable key "FOO=BAR". Keys must match shell variable format: start with letter or underscore, followed by letters, digits, or underscores`, wantErr: true},
+		{name: "newline", key: "FOO\nBAR", wantField: "env.FOO\nBAR", wantMsg: `invalid environment variable key "FOO\nBAR". Keys must match shell variable format: start with letter or underscore, followed by letters, digits, or underscores`, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateEnvKey(tt.key)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+
+				var ce *ConfigError
+				if !errors.As(err, &ce) {
+					t.Fatalf("expected *ConfigError, got %T: %v", err, err)
+				}
+				if ce.Field != tt.wantField {
+					t.Errorf("Field = %q, want %q", ce.Field, tt.wantField)
+				}
+				if tt.wantMsg != "" && !strings.Contains(ce.Msg, tt.wantMsg) {
+					t.Errorf("Msg = %q, want substring %q", ce.Msg, tt.wantMsg)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestValidateEnvValue(t *testing.T) {
+	tests := []struct {
+		name      string
+		key       string
+		value     string
+		wantField string
+		wantMsg   string
+		wantErr   bool
+	}{
+		{name: "dsn with spaces and equals", key: "DSN", value: "host=localhost dbname=test"},
+		{name: "path style", key: "PATH", value: "/usr/local/bin:/usr/bin"},
+		{name: "quoted content", key: "QUOTED", value: "it's a \"test\""},
+		{name: "empty string", key: "EMPTY", value: ""},
+		{name: "unicode", key: "UNICODE", value: "cafe\u0301"},
+		{name: "literal newline", key: "NEWLINE", value: "line1\nline2", wantField: "env.NEWLINE", wantMsg: "value contains newline or null byte characters which could inject Dockerfile directives. Remove newlines and null bytes from the value", wantErr: true},
+		{name: "carriage return", key: "CR", value: "line1\rline2", wantField: "env.CR", wantMsg: "value contains newline or null byte characters which could inject Dockerfile directives. Remove newlines and null bytes from the value", wantErr: true},
+		{name: "null byte", key: "NULL", value: "val\x00ue", wantField: "env.NULL", wantMsg: "value contains newline or null byte characters which could inject Dockerfile directives. Remove newlines and null bytes from the value", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateEnvValue(tt.key, tt.value)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+
+				var ce *ConfigError
+				if !errors.As(err, &ce) {
+					t.Fatalf("expected *ConfigError, got %T: %v", err, err)
+				}
+				if ce.Field != tt.wantField {
+					t.Errorf("Field = %q, want %q", ce.Field, tt.wantField)
+				}
+				if tt.wantMsg != "" && !strings.Contains(ce.Msg, tt.wantMsg) {
+					t.Errorf("Msg = %q, want substring %q", ce.Msg, tt.wantMsg)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestParse_envValidation(t *testing.T) {
+	tests := []struct {
+		name      string
+		envYAML   string
+		wantField string
+		wantMsg   string
+	}{
+		{
+			name: "invalid key with space",
+			envYAML: `
+env:
+  "MY VAR": value
+`,
+			wantField: "env.MY VAR",
+			wantMsg:   `invalid environment variable key "MY VAR". Keys must match shell variable format: start with letter or underscore, followed by letters, digits, or underscores`,
+		},
+		{
+			name: "invalid key starts with digit",
+			envYAML: `
+env:
+  "1VAR": value
+`,
+			wantField: "env.1VAR",
+			wantMsg:   `invalid environment variable key "1VAR". Keys must match shell variable format: start with letter or underscore, followed by letters, digits, or underscores`,
+		},
+		{
+			name: "invalid multiline value",
+			envYAML: `
+env:
+  SAFE: |
+    line1
+    line2
+`,
+			wantField: "env.SAFE",
+			wantMsg:   "value contains newline or null byte characters which could inject Dockerfile directives. Remove newlines and null bytes from the value",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			cfg := writeConfig(t, dir, `
+installed_agents: [claude]`+tt.envYAML)
+
+			_, err := Parse(cfg)
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+
+			var ce *ConfigError
+			if !errors.As(err, &ce) {
+				t.Fatalf("expected *ConfigError, got %T: %v", err, err)
+			}
+			if ce.Field != tt.wantField {
+				t.Errorf("Field = %q, want %q", ce.Field, tt.wantField)
+			}
+			if !strings.Contains(ce.Msg, tt.wantMsg) {
+				t.Errorf("Msg = %q, want substring %q", ce.Msg, tt.wantMsg)
+			}
+		})
+	}
+}
+
 func TestParse_explicitProjectNameSanitized(t *testing.T) {
 	tests := []struct {
 		name     string

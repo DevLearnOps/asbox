@@ -22,6 +22,7 @@ var sanitizeRe = regexp.MustCompile(`[^a-z0-9-]+`)
 var collapseHyphens = regexp.MustCompile(`-{2,}`)
 var sdkVersionRe = regexp.MustCompile(`^[0-9a-zA-Z.\-+]+$`)
 var packageNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9.\-+=:]*$`)
+var envKeyRe = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 
 // Parse reads, unmarshals, validates, and resolves a config file.
 func Parse(configPath string) (*Config, error) {
@@ -136,6 +137,20 @@ func Parse(configPath string) (*Config, error) {
 
 	for i, pkg := range cfg.Packages {
 		if err := validatePackageName(i, pkg); err != nil {
+			return nil, err
+		}
+	}
+
+	envKeys := make([]string, 0, len(cfg.Env))
+	for key := range cfg.Env {
+		envKeys = append(envKeys, key)
+	}
+	sort.Strings(envKeys)
+	for _, key := range envKeys {
+		if err := validateEnvKey(key); err != nil {
+			return nil, err
+		}
+		if err := validateEnvValue(key, cfg.Env[key]); err != nil {
 			return nil, err
 		}
 	}
@@ -260,5 +275,31 @@ func validatePackageName(index int, pkg string) error {
 	return &ConfigError{
 		Field: field,
 		Msg:   fmt.Sprintf("contains invalid characters %q. Allowed: alphanumeric, hyphens, dots, plus signs, equals signs, colons (apt format)", pkg),
+	}
+}
+
+func validateEnvKey(key string) error {
+	if key == "" {
+		return &ConfigError{
+			Field: "env.",
+			Msg:   "empty environment variable key is not allowed",
+		}
+	}
+	if envKeyRe.MatchString(key) {
+		return nil
+	}
+	return &ConfigError{
+		Field: "env." + key,
+		Msg:   fmt.Sprintf("invalid environment variable key %q. Keys must match shell variable format: start with letter or underscore, followed by letters, digits, or underscores", key),
+	}
+}
+
+func validateEnvValue(key, value string) error {
+	if !strings.ContainsAny(value, "\n\r\x00") {
+		return nil
+	}
+	return &ConfigError{
+		Field: "env." + key,
+		Msg:   "value contains newline or null byte characters which could inject Dockerfile directives. Remove newlines and null bytes from the value",
 	}
 }

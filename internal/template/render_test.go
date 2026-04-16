@@ -84,6 +84,34 @@ func TestRender_envVars(t *testing.T) {
 	}
 }
 
+func TestRender_envVarsEscaped(t *testing.T) {
+	cfg := &config.Config{
+		InstalledAgents: []string{"claude"},
+		Env: map[string]string{
+			"QUOTES":     `it's a "test"`,
+			"BACKSLASH":  `C:\path\to\file`,
+			"MIXED":      `say \"hello\"`,
+			"SAFE_PLAIN": "no_special_chars",
+		},
+	}
+	output, err := Render(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(output, `ENV QUOTES="it's a \"test\""`) {
+		t.Error("expected double-quotes in value to be escaped")
+	}
+	if !strings.Contains(output, `ENV BACKSLASH="C:\\path\\to\\file"`) {
+		t.Error("expected backslashes in value to be escaped")
+	}
+	if !strings.Contains(output, `ENV MIXED="say \\\"hello\\\""`) {
+		t.Error("expected mixed backslash+quote in value to be escaped")
+	}
+	if !strings.Contains(output, `ENV SAFE_PLAIN="no_special_chars"`) {
+		t.Error("expected plain value to pass through unmodified")
+	}
+}
+
 func TestRender_noEnvVars(t *testing.T) {
 	cfg := &config.Config{InstalledAgents: []string{"claude"}}
 	output, err := Render(cfg)
