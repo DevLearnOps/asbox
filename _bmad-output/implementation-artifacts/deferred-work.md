@@ -88,3 +88,8 @@ Last updated: 2026-04-17 (code review of story 11-6)
 - **`git -c key=val push` bypasses wrapper** — Known per accidental threat model. [embed/git-wrapper.sh] _(story 3-1)_
 - **Only `push` blocked; other exfiltration open** — By design per threat model — convenience boundary. _(story 3-1)_
 - **No traversal depth limit in `ScanDeps`** — `filepath.WalkDir` doesn't skip `.git`, `vendor`, `.cache`. Performance concern for large repos. [internal/mount/isolate_deps.go] _(story 6-1)_
+
+## Deferred from: code review of 11-5-pinned-build-dependencies (2026-04-17)
+
+- No checksum verification on Docker Compose binary download — `embed/Dockerfile.tmpl` fetches Docker Compose via curl without SHA256 integrity check. Pre-existing pattern, not introduced by version pinning.
+- Build-time `npx playwright install` browser versions determined by transitive deps — browser builds fetched at build time are controlled by `@playwright/mcp`'s dependency tree, not explicitly pinned. Pre-existing pattern.
