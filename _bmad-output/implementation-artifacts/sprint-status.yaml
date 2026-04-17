@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: "2026-04-08"
-last_updated: "2026-04-17"  # story 11-6 code review complete, status: done
+last_updated: "2026-04-17"  # PRD edit: folded future-work.md into Epics 12-15 backlog
 
 
 
@@ -120,3 +120,25 @@ development_status:
   11-5-pinned-build-dependencies: done
   11-6-agent-command-injection-hardening: done
   epic-11-retrospective: optional
+
+  # Epic 12: CLI Ergonomics for Agent Override (from future-work.md 2026-04-17)
+  epic-12: backlog
+  12-1-short-flag-and-positional-agent-argument: backlog
+  epic-12-retrospective: optional
+
+  # Epic 13: Multi-Repo State Management (from future-work.md 2026-04-17)
+  epic-13: backlog
+  13-1-branch-management-guidance-in-agent-instructions: backlog
+  13-2-fetch-flag-for-upstream-sync: backlog
+  epic-13-retrospective: optional
+
+  # Epic 14: Pre-Installed Validation & Exploration Toolchain (from future-work.md 2026-04-17)
+  epic-14: backlog
+  14-1-pre-installed-devops-validation-toolchain: backlog
+  14-2-pre-installed-code-exploration-tools: backlog
+  epic-14-retrospective: optional
+
+  # Epic 15 (Research/POC): Local Kubernetes Cluster Integration (from future-work.md 2026-04-17)
+  epic-15: backlog
+  15-1-kubernetes-integration-research-spike: backlog
+  epic-15-retrospective: optional

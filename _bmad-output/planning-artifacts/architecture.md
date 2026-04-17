@@ -74,10 +74,11 @@ The security model protects against **accidental leakage from AI agents that hal
 
 - **Two execution domains** — Go on host, bash inside container. The architecture must clearly define what runs where and how data flows across the boundary (config → Docker build args → image → Docker run flags → entrypoint env vars).
 - **Embedded asset lifecycle** — all supporting files compiled into the binary. Changes require rebuild. Version-tagged releases make the relationship explicit. The architecture must define which files are embedded and how they're extracted/used.
-- **Config as single source of truth** — `.asbox/config.yaml` is parsed once by the Go CLI and drives: template rendering, build arg assembly, run flag assembly, mount assembly, secret validation, auto_isolate_deps scanning, bmad_repos mounting. Single parse, multiple consumers. The `--agent` CLI flag can override `default_agent` after parsing but before any downstream consumers read it.
+- **Config as single source of truth** — `.asbox/config.yaml` is parsed once by the Go CLI and drives: template rendering, build arg assembly, run flag assembly, mount assembly, secret validation, auto_isolate_deps scanning, bmad_repos mounting. Single parse, multiple consumers. The `-a`/`--agent` CLI flag or the positional agent argument on `asbox run` can override `default_agent` after parsing but before any downstream consumers read it. The two override forms are mutually exclusive at the CLI boundary — providing both exits with code 2 before any config work happens.
 - **Content-hash scoping** — hash inputs must be carefully defined: rendered template output + config content. Changes to the Go CLI source do NOT trigger image rebuilds.
 - **Isolation enforcement is distributed** — not a standalone component. Git wrapper (shell script), network isolation (Podman rootless), filesystem isolation (mount config), secret isolation (runtime env handling). Each component owns its own isolation enforcement.
 - **Path resolution** — mount paths resolved relative to config file location, not working directory. Applies to mounts, bmad_repos, and host_agent_config.
+- **Missing-path policy is mount-type-specific** — two deliberately opposite behaviors: `bmad_repos` entries are **fail-closed** (missing path or non-directory exits 1 with a descriptive error, so the sandbox never launches against a partial declared workspace), while `host_agent_config` is **silent-skip** (missing host config directory simply omits the mount, supporting multi-agent images where not every agent is set up on the host). The divergence is intentional: bmad_repos defines the agent's workspace contract; host_agent_config is optional OAuth convenience.
 - **MCP manifest flow** — build-time manifest at `/etc/sandbox/mcp-servers.json` merged with project `.mcp.json` at runtime. Project config wins on name conflicts.
 
 ## Starter Template Evaluation
@@ -274,9 +275,12 @@ asbox/
 
 - **Decision:** Each repo path mounted to `/workspace/repos/<basename>`, agent instruction file generated from Go template
 - **Rationale:** Enables multi-repository development workflows. Convention-based target mapping keeps config simple (flat list of paths). Generated agent instructions ensure the agent knows where repos are and how to work with them.
+- **Strict path existence validation (fail-closed):** Every entry in `bmad_repos` MUST resolve to an existing directory on the host before `docker run` is invoked. For each entry, `AssembleBmadRepos()` runs an `os.Stat` check: if the path does not exist, the CLI exits with code 1 and prints `"error: bmad_repos path '<path>' not found. Check bmad_repos in .asbox/config.yaml"`. If the path exists but is not a directory (regular file, device, etc.), the CLI exits with code 1 and prints an analogous "is not a directory" error. No automatic creation, no silent skip — this is a deliberate departure from the `host_agent_config` policy (which silently skips missing directories). Rationale: `host_agent_config` is optional convenience for OAuth sync; `bmad_repos` defines the agent's workspace, and launching the sandbox with a subset of the declared repos would produce an inconsistent context where the agent believes it has access to repositories it cannot see. Fail-closed guarantees the sandbox always operates against the full declared context or not at all.
+- **Validation location:** Path validation runs in `internal/mount/bmad_repos.go` at runtime — NOT in `internal/config/parse.go` at config load time. Deferring to runtime matches the pattern used by `mount.go` (regular mounts) and `isolate_deps.go` (auto_isolate_deps scan), keeps config parsing pure (no filesystem dependency), and preserves the "single parse, multiple consumers" property of the Config struct.
 - **Basename collision detection:** If two repo paths resolve to the same basename (e.g., `/Users/manuel/repos/client` and `/Users/manuel/work/client`), the CLI errors with exit code 1: `"error: bmad_repos basename collision — 'client' resolves from both /Users/manuel/repos/client and /Users/manuel/work/client. Rename one directory or use symlinks to disambiguate."` No automatic disambiguation — explicit failure forces the user to resolve the ambiguity.
-- **Implementation:** `internal/mount/` package assembles mount flags with collision check. Go `text/template` generates agent instruction file (CLAUDE.md/GEMINI.md/CODEX.md) with repo list. Instruction file mounted into container at agent's expected config location.
-- **Affects:** `internal/mount/` (mount assembly + collision detection), `embed/agent-instructions.md` (Go template), `cmd/run.go` (mount + instruction generation)
+- **Validation ordering:** For each entry, check existence → check is-a-directory → accumulate for collision check → collision check across all accumulated entries. On first error, stop and return — do not pile up multiple failures.
+- **Implementation:** `internal/mount/` package assembles mount flags with existence, directory, and collision checks. Go `text/template` generates agent instruction file (CLAUDE.md/GEMINI.md/CODEX.md) with repo list. Instruction file mounted into container at agent's expected config location.
+- **Affects:** `internal/mount/` (existence/directory/collision checks + mount assembly), `embed/agent-instructions.md` (Go template), `cmd/run.go` (mount + instruction generation)
 
 ### Host Agent Config (`host_agent_config`)
 
@@ -289,6 +293,50 @@ asbox/
 - **Silent skip:** If the host config directory does not exist (agent not set up on host), the mount is silently skipped — no error. This supports multi-agent images where not all agents are configured on the host.
 - **Known limitation (Phase 2):** No integrity checking — an agent with write access could modify configuration that persists after the sandbox exits. Future enhancement: snapshot config directory state on startup for post-session diff.
 - **Affects:** `internal/config/config.go` (AgentConfigRegistry), `internal/mount/mount.go` (AssembleHostAgentConfig), `cmd/run.go` (mount flag + env var assembly)
+
+### CLI Agent Override (Short Flag + Positional)
+
+- **Decision:** Cobra `-a` short alias bound to the same flag as `--agent`. `cmd/run.go` registers a single optional positional argument via `cobra.MaximumNArgs(1)`. Resolution order inside `runCmd.RunE`:
+  1. If `args[0]` is set AND the flag was explicitly changed (detected via `cmd.Flags().Changed("agent")`) → return a `UsageError` with both inputs named. Mapped to exit code 2 by `cmd/root.go`.
+  2. Else if `args[0]` is set → use it as the agent override.
+  3. Else if the flag was set → use the flag value.
+  4. Else → use `config.DefaultAgent`.
+- **Rationale:** Explicit mutual exclusion avoids ambiguity and makes the CLI contract inspectable from `--help`. Detecting "flag explicitly set" via `Flags().Changed()` (not value comparison) correctly handles the case where a user passes `-a claude` while `default_agent` is also `claude`.
+- **Validation:** Whichever form resolves is passed through the existing `ValidateAgent` / `ValidateAgentInstalled` pair — no new validation surface.
+- **Error message format:** `"error: agent specified both as positional argument ('codex') and via --agent ('claude') — use only one form"`.
+- **Affects:** `cmd/run.go` (cobra args, resolution, UsageError emission), `cmd/root.go` (UsageError → exit code 2 mapping)
+
+### Multi-Repo Upstream Fetch (`--fetch`)
+
+- **Decision:** `--fetch` is a boolean flag on `asbox run`. When set, after config parse and mount assembly but before `docker run` invocation, a new `internal/gitfetch/` package iterates the resolved set of host-side git repositories (primary mount if `.git/` is present + every entry from `bmad_repos`) and invokes `git fetch --all` on each via `os/exec`. Fetches run concurrently with a bounded worker pool (default 4) to keep wall time down on large repo sets without thrashing SSH auth.
+- **Rationale:** The sandbox has no access to host SSH keys or credential helpers (NFR1, NFR6), so it cannot fetch upstream state itself for private repos. Running fetch host-side reuses the developer's existing credentials transparently. A new top-level command (`asbox fetch`) was evaluated and rejected: it widens the surface area, duplicates resolution logic, and users would still usually want a fetch immediately before a run — folding it into `asbox run --fetch` keeps one entry point.
+- **Failure handling:** Per-repository failures (network error, auth failure on a single remote) are logged as warnings (`warning: fetch failed for /Users/m/repos/foo: <git stderr>`) but do NOT abort the launch. This preserves offline use — a developer working without network still gets a sandbox, with a visible line per failed repo.
+- **Detection:** A path is treated as a git repository if `filepath.Join(path, ".git")` exists (file or directory — worktrees emit a `.git` file). If not, the path is skipped silently.
+- **Affects:** `cmd/run.go` (flag, orchestration call), `internal/gitfetch/fetch.go` (new package — `FetchAll(paths []string) []FetchResult`), `internal/config/` (no change — `bmad_repos` already holds the list)
+
+### Pre-Installed Validation & Exploration Toolchain
+
+- **Decision:** Add two new RUN blocks at the top of `embed/Dockerfile.tmpl`: `validation_tools` and `exploration_tools`. Both install at explicit pinned versions with multi-arch detection (per existing pattern). A leading comment block documents every pinned version, the upstream release page used to discover it, and the update procedure.
+- **Rationale:** The agent needs these tools to self-validate work (render helm charts, lint terraform, scan images, locate symbols) without trial-and-error package installation. Baking them into the base image eliminates a latency and reliability tax on every sandbox run.
+- **Installation strategy per tool:**
+  - `jq`, `yq` (mikefarah), `ripgrep`, `fd-find`, `git`, `universal-ctags`: apt packages where version is acceptable; binary download otherwise.
+  - `kubectl`, `helm`, `kustomize`, `opentofu`, `tflint`, `kubeconform`, `kube-linter`, `trivy`, `flux`, `sops`, `ast-grep`: versioned GitHub-release tarballs via `curl -fsSL`, extracted to `/usr/local/bin`, `chmod +x`. Multi-arch detection via `$(dpkg --print-architecture)` or `$(uname -m)` matching each project's release naming.
+  - No `curl | bash` installers — integrity failures would be silent. All downloads are to a known URL with a known binary name.
+- **Cache/data directory ownership:** The Dockerfile template creates `~/.cache/trivy`, `~/.cache/helm`, `~/.kube`, `~/.terraform.d`, and friends with `chown sandbox:sandbox`, so first-use DB/plugin fetches succeed without `sudo`.
+- **Content-hash impact:** Pinned versions are embedded in the Dockerfile template. Bumping a version changes the rendered Dockerfile, which changes the content hash (per existing hash inputs), which triggers a rebuild. This is the correct behavior — no special handling needed.
+- **Affects:** `embed/Dockerfile.tmpl` (two new RUN blocks with version pins + comment header), integration tests under `integration/toolchain_test.go` (new — smoke test that each binary exists and `--version` exits 0)
+
+### Local Kubernetes Cluster Integration (Exploratory / Deferred)
+
+- **Status:** Research spike only. NOT a committed architectural decision. Listed here so the intent and constraints are captured before the spike begins.
+- **Problem framing:** Agents building for EKS/OpenShift benefit from a disposable cluster to validate helm/kustomize renders end-to-end. Every sandbox-wide decision (isolation model, Podman socket, network) constrains which integration paths are feasible.
+- **Evaluation tracks:**
+  - **Track A — `kind` inside the sandbox via inner Podman.** Fully isolated, zero host state. Trade-off: nested container overhead (Podman-in-Podman, already using `vfs` storage driver), no reachability from host, cluster lifetime tied to sandbox lifetime.
+  - **Track B — Host-side `k3s` or `kind`, kubeconfig mounted into the sandbox.** Low overhead, fast startup, cluster persists across sandbox restarts. Trade-off: widens isolation surface — the kubeconfig gives the agent cluster-admin on a host-side cluster, so deliberate misuse could affect host resources (cluster crashes, disk fill, port binding). Mitigated by a disposable cluster convention but real.
+  - **Track C — TBD.** Alternatives surface from the spike (shared k3s in a CI namespace, vcluster, etc.).
+- **Decision gate:** Spike produces a report with a recommended track, a prototype `asbox.k8s` toggle or flag sketch, and a security analysis of the kubeconfig trust boundary (Track B). Productionization requires user sign-off on the recommended track.
+- **Non-goals:** No production-grade multi-cluster management. Not a replacement for real CI.
+- **Affects:** None yet — design intentionally postponed to the spike.
 
 ### Decision Impact Analysis
 
@@ -470,13 +518,16 @@ asbox/
 │   ├── hash/                        # Content-hash computation
 │   │   ├── hash.go                  # Compute() — SHA256 over rendered Dockerfile + scripts + digest + config
 │   │   └── hash_test.go
-│   └── mount/                       # Mount assembly and dependency isolation
-│       ├── mount.go                 # AssembleMounts() — regular mounts; AssembleHostAgentConfig() — agent-aware config mount
-│       ├── isolate_deps.go          # ScanDeps() — filepath.WalkDir for package.json, volume flags
-│       ├── bmad_repos.go            # AssembleBmadRepos() — repo mounts, collision detection, instruction gen
-│       ├── mount_test.go
-│       ├── isolate_deps_test.go
-│       └── bmad_repos_test.go
+│   ├── mount/                       # Mount assembly and dependency isolation
+│   │   ├── mount.go                 # AssembleMounts() — regular mounts; AssembleHostAgentConfig() — agent-aware config mount
+│   │   ├── isolate_deps.go          # ScanDeps() — filepath.WalkDir for package.json, volume flags
+│   │   ├── bmad_repos.go            # AssembleBmadRepos() — repo mounts, collision detection, instruction gen
+│   │   ├── mount_test.go
+│   │   ├── isolate_deps_test.go
+│   │   └── bmad_repos_test.go
+│   └── gitfetch/                    # Host-side upstream fetch for --fetch
+│       ├── fetch.go                 # FetchAll() — concurrent git fetch --all over resolved repo list
+│       └── fetch_test.go
 ├── embed/                           # Embedded asset source files
 │   ├── embed.go                     # //go:embed directives, exports embedded FS
 │   ├── Dockerfile.tmpl              # Go text/template Dockerfile
@@ -635,7 +686,15 @@ var Assets embed.FS
 | FR50 (embedded assets) | `embed/embed.go` | `//go:embed` directives |
 | FR51-FR53 (bmad_repos) | `internal/mount/bmad_repos.go`, `embed/agent-instructions.md.tmpl` | Mount assembly + instruction gen |
 | FR54 (single binary) | `go.mod`, `.goreleaser.yaml` | `CGO_ENABLED=0` static linking |
+| FR60 (`-a` short flag) | `cmd/run.go` | Cobra flag shorthand |
+| FR61 (positional agent + mutex) | `cmd/run.go`, `cmd/root.go` | `cobra.MaximumNArgs(1)` + `Flags().Changed()` check, `UsageError` → exit 2 |
+| FR62 (DevOps validation tools) | `embed/Dockerfile.tmpl` | Pinned-version RUN block, per-tool cache dir ownership |
+| FR63 (code exploration tools) | `embed/Dockerfile.tmpl` | Pinned-version RUN block |
+| FR64 (branch-management guidance) | `embed/agent-instructions.md.tmpl` | Static guidance section with feature-branch / stash / resume conventions |
+| FR65 (`--fetch`) | `cmd/run.go`, `internal/gitfetch/` | Flag → `FetchAll()` call before `docker run` |
+| FR66 (k8s POC) | N/A (deferred research) | See exploratory architecture decision; no implementation mapping |
 | NFR15 (integration tests) | `integration/` | testcontainers-go test suite |
+| NFR16 (pinned toolchain) | `embed/Dockerfile.tmpl` | Single comment-block header documenting all pinned versions and update process |
 
 ## Architecture Validation Results
 

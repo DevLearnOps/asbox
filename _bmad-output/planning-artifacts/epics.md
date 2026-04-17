@@ -82,6 +82,13 @@ FR51: Developer can configure `bmad_repos` as a list of local paths to checked-o
 FR52: When `bmad_repos` is configured, the system automatically creates mount mappings for each repository into `/workspace/repos/<repo_name>` inside the sandbox container
 FR53: When `bmad_repos` is configured, the system generates an agent configuration file instructing the agent about git operations within repos, and mounts it into the container
 FR54: The system is distributed as a single statically-linked Go binary with no external runtime dependencies beyond Docker
+FR60: Developer can use `-a` as a short alias for `--agent` on `asbox run`
+FR61: Developer can specify the agent as a positional argument on `asbox run`; providing both positional and `-a`/`--agent` exits with code 2
+FR62: Sandbox image includes pre-installed DevOps validation tools at pinned versions (kubectl, helm, kustomize, yq, jq, opentofu, tflint, kubeconform, kube-linter, trivy, flux, sops)
+FR63: Sandbox image includes pre-installed code exploration tools at pinned versions (ripgrep, fd, ast-grep, universal-ctags)
+FR64: Generated bmad_repos agent instructions include explicit branch-management guidance (feature branches, stashing, cross-session resume)
+FR65: Developer can pass `--fetch` to `asbox run` to run host-side `git fetch --all` across all mounted repositories before the agent launches
+FR66 (exploratory): System supports experimental integration paths for a local Kubernetes cluster — research spike with three evaluation tracks (in-sandbox kind, host k3s with kubeconfig injection, TBD alternatives)
 
 ### NonFunctional Requirements
 
@@ -100,6 +107,7 @@ NFR12: Image builds are reproducible — same config + template + sandbox files 
 NFR13: CLI fails fast with error messages naming the missing dependency, unset secret, or invalid field with fix action. Each error category returns a distinct exit code (1-4).
 NFR14: Crashed or Ctrl+C'd sandbox leaves no orphaned containers or dangling networks
 NFR15: Integration test suite covers all supported use cases with parallel Go test execution
+NFR16: Pre-installed DevOps and exploration tools (FR62, FR63) use explicit pinned versions declared in a single place in `embed/Dockerfile.tmpl`. Version bumps trigger a content-hash rebuild
 
 ### Additional Requirements
 
@@ -215,6 +223,14 @@ N/A — asbox is a CLI tool with no GUI. No UX design document applicable.
 | NFR11 | Epic 11 | Non-TTY runtime support for CI/CD |
 | NFR12 | Epic 11 | Pinned build dependencies for reproducibility |
 | NFR14 | Epic 11 | Concurrent sandbox session support |
+| FR60 | Epic 12 | `-a` short flag for agent override |
+| FR61 | Epic 12 | Positional agent argument with mutual exclusion |
+| FR64 | Epic 13 | Branch-management guidance in bmad_repos agent instructions |
+| FR65 | Epic 13 | `--fetch` flag for host-side upstream sync |
+| FR62 | Epic 14 | Pre-installed DevOps validation toolchain |
+| FR63 | Epic 14 | Pre-installed code exploration tools |
+| NFR16 | Epic 14 | Pinned versions for pre-installed toolchain |
+| FR66 | Epic 15 (POC) | Local Kubernetes cluster integration research spike |
 
 ## Epic List
 
@@ -269,6 +285,22 @@ A developer can run concurrent sandbox sessions, use asbox in CI/CD pipelines, a
 - 11-4: Non-TTY Runtime Support — TTY detection, conditional -it vs -i
 - 11-5: Pinned Build Dependencies — Docker Compose, npm agents, multi-arch base image digest, update workflow
 - 11-6: Agent Command Injection Hardening — replace bash -c with exec array pattern
+
+### Epic 12: CLI Ergonomics for Agent Override
+Reduce friction on the most common runtime choice (which agent to launch) by adding a short flag alias and a positional argument to `asbox run`. Enforce mutual exclusion between the two forms so resolution is never ambiguous.
+**FRs covered:** FR60, FR61
+
+### Epic 13: Multi-Repo State Management
+A developer working across multiple repositories via `bmad_repos` gets two improvements: the generated agent instructions include opinionated branch-management conventions so the agent doesn't have to improvise, and `asbox run --fetch` syncs every mounted repository with its remote before the sandbox starts — solving the "sandbox can't reach host git credentials" problem by performing fetch on the host side.
+**FRs covered:** FR64, FR65
+
+### Epic 14: Pre-Installed Validation & Exploration Toolchain
+The sandbox image ships with a pinned DevOps validation toolchain (kubectl, helm, kustomize, yq, jq, opentofu, tflint, kubeconform, kube-linter, trivy, flux, sops) and a pinned code exploration toolchain (ripgrep, fd, ast-grep, universal-ctags). Agents can validate Kubernetes/Terraform work and navigate repos efficiently without spending turns on package installation or tool discovery.
+**FRs covered:** FR62, FR63, NFR16
+
+### Epic 15 (Research/POC): Local Kubernetes Cluster Integration
+Research spike evaluating whether and how to expose a disposable local Kubernetes cluster to the sandboxed agent. Three evaluation tracks are on the table: (a) `kind` inside the sandbox via inner Podman, (b) host-side `k3s`/`kind` with kubeconfig injection, (c) alternatives surfaced by the spike. Output is a recommendation, prototype, and security analysis. Productionization is gated on the spike outcome and not committed here.
+**FRs covered:** FR66 (exploratory)
 
 ## Epic 1: Developer Can Build and Launch a Sandbox
 
@@ -1439,3 +1471,265 @@ So that agent command strings cannot be exploited through shell injection.
 - Option B: Pass separate env vars `AGENT_BIN` and `AGENT_ARGS` for explicit control
 - Option A is simpler and sufficient since agent commands are controlled by the Go CLI, not user input
 - Update all agent command strings in `cmd/run.go` to ensure they are safe for word-splitting
+
+## Epic 12: CLI Ergonomics for Agent Override
+
+Reduce friction on the most common runtime choice — "which agent do I want to launch right now?" — by adding a short flag alias (`-a`) and a positional argument to `asbox run`. Both forms coexist with the existing `--agent` flag; specifying more than one form produces a usage error so resolution is never ambiguous.
+
+### Story 12.1: Short `-a` Flag and Positional Agent Argument for `asbox run`
+
+As a developer,
+I want to switch agents quickly with either `asbox run -a codex` or `asbox run codex`,
+So that I don't have to type `--agent` every time I want to try a different agent.
+
+**Acceptance Criteria:**
+
+**Given** the developer runs `asbox run -a codex`
+**When** the CLI parses flags
+**Then** `codex` is used as the agent override (must be in `installed_agents`), with identical validation and behavior to `--agent codex`
+
+**Given** the developer runs `asbox run codex` (positional argument, no flag)
+**When** the CLI parses arguments
+**Then** `codex` is used as the agent override, with identical validation and behavior to `--agent codex`
+
+**Given** the developer runs `asbox run codex --agent claude` or `asbox run -a claude codex`
+**When** the CLI parses arguments
+**Then** the CLI exits with code 2 and prints `error: agent specified both as positional argument ('codex') and via --agent ('claude') — use only one form` — and no container is started
+
+**Given** the developer runs `asbox run notanagent` (positional value not in `installed_agents`)
+**When** the CLI parses arguments
+**Then** the CLI exits with code 1 via the existing `ValidateAgentInstalled` error path, naming the unknown agent and listing the installed agents
+
+**Given** the developer runs `asbox run` with neither positional nor flag
+**When** the CLI resolves the agent
+**Then** `config.DefaultAgent` is used as before — no behavior change for the default case
+
+**Given** the developer runs `asbox run --help`
+**When** the help text is rendered
+**Then** both the short flag (`-a, --agent`) and the positional `[agent]` appear in the usage line with a one-line description of each
+
+**Implementation Notes:**
+- Add `Shorthand: "a"` to the existing `--agent` flag definition in `cmd/run.go`.
+- Set `Args: cobra.MaximumNArgs(1)` on the `runCmd` definition.
+- In `runCmd.RunE`: detect "flag explicitly set" via `cmd.Flags().Changed("agent")` (not by value comparison — user could have passed `-a claude` while `default_agent` is already `claude`). If both `len(args) == 1` and `Changed("agent")` are true, return a new `UsageError` type.
+- Add `UsageError` to `cmd/errors.go` and map it to exit code 2 in `cmd/root.go`'s `exitCode()` function, alongside the existing entries. Add to `cmd/root_test.go` table.
+- Resolution precedence inside `runCmd.RunE`: (1) both set → `UsageError`; (2) positional set → use it; (3) flag set → use it; (4) neither → fall through to `config.DefaultAgent`.
+- Pass the resolved agent name through the existing `ValidateAgentInstalled` call — no duplication of validation logic.
+- Update the Cobra `Use:` string on `runCmd` from `"run"` to `"run [agent]"` so the help text surfaces the positional.
+- Tests: table-driven test in `cmd/run_test.go` covering all six acceptance criteria cases. Integration test (binary invocation) verifying `-a` short flag resolves through a real `asbox run` invocation.
+
+## Epic 13: Multi-Repo State Management
+
+Developers running `asbox` with `bmad_repos` across multiple repositories today have two friction points: (1) the agent has to improvise branch-management conventions each session (feature branch? stash? pick up from last branch?), which produces inconsistent behavior; and (2) the sandboxed agent has no access to host SSH keys or git credential helpers, so it cannot `git fetch` private remotes — the developer has to remember to fetch each repo on the host before starting. This epic addresses both by baking branch conventions into the generated agent instructions and by adding a `--fetch` flag that runs host-side `git fetch --all` across every mounted repository before the sandbox starts.
+
+### Story 13.1: Branch-Management Guidance in Generated Agent Instructions
+
+As a developer using `bmad_repos`,
+I want the generated agent instructions to include an opinionated branch-management convention,
+So that every agent session manages cross-repo branch state the same way without me having to repeat instructions each run.
+
+**Acceptance Criteria:**
+
+**Given** a developer configures `bmad_repos` with two or more repositories
+**When** `asbox run` generates the agent instruction file (`CLAUDE.md` / `GEMINI.md` / `CODEX.md`)
+**Then** the rendered file includes a dedicated "Branch Management" section covering three topics in this order: (1) how to create a per-task feature branch in each affected repo before making changes, (2) how to stash or otherwise park in-flight work to keep working trees clean between tasks within a session, (3) how to resume work after a sandbox restart (check the current branch, inspect stash list)
+
+**Given** the branch-management section exists in the template
+**When** inspected
+**Then** the guidance is a single convention (one feature-branch naming pattern, one stash convention), not a menu of options — the agent should not choose between alternatives
+
+**Given** the generated instruction file
+**When** `bmad_repos` is empty or unset
+**Then** the branch-management section is omitted (it only applies when there are multiple repos to coordinate)
+
+**Given** the branch naming convention
+**When** documented
+**Then** it uses a template placeholder (e.g., `asbox/<short-task-slug>`) and the instruction tells the agent to substitute a short slug derived from the task at hand
+
+**Given** the instruction file is regenerated on every `asbox run`
+**When** the repo list or project name changes
+**Then** the branch-management section remains consistent — no drift from prior sessions
+
+**Implementation Notes:**
+- Extend `embed/agent-instructions.md.tmpl` with a `{{if .HasBmadRepos}} ... {{end}}` block containing the Branch Management section.
+- The guidance should call out the three topics explicitly (feature branch, stash, resume) with concrete shell snippets.
+- No Go code changes needed — purely a template edit — but the existing template test (`internal/mount/bmad_repos_test.go`) should be extended with a case asserting the Branch Management section is present when `bmad_repos` is non-empty and absent otherwise.
+
+### Story 13.2: `--fetch` Flag for Host-Side Upstream Sync
+
+As a developer,
+I want `asbox run --fetch` to fetch upstream state for every repository I'm about to mount,
+So that the sandboxed agent has current remote refs on all branches — including branches it isn't checked out on — without needing host credential access.
+
+**Acceptance Criteria:**
+
+**Given** the developer runs `asbox run --fetch` with `bmad_repos` listing three repositories
+**When** the CLI begins launch orchestration
+**Then** before `docker run` is invoked, the CLI runs `git fetch --all` on each of the three `bmad_repos` paths using the developer's host credentials, and on the primary mount if it is a git repository
+
+**Given** `--fetch` is set and one of the repositories is not a git repository (no `.git` entry)
+**When** the fetch phase runs
+**Then** that path is skipped silently — no error, no warning
+
+**Given** `--fetch` is set and one of the repositories fails to fetch (network error, auth failure)
+**When** the fetch phase runs
+**Then** the error is logged as a warning naming the failed repo and the git stderr, and the launch continues — other repos still get fetched and the sandbox still starts
+
+**Given** `--fetch` is set with multiple repositories
+**When** the fetch phase runs
+**Then** fetches run concurrently with a bounded worker pool (default 4) and total wall time is close to the longest single fetch, not the sum
+
+**Given** `--fetch` is NOT passed
+**When** the CLI begins launch orchestration
+**Then** no fetch runs — the sandbox starts immediately, preserving offline-use behavior
+
+**Given** the `--help` output for `asbox run`
+**When** rendered
+**Then** the `--fetch` flag appears with a one-line description stating what it does and that failures are non-fatal
+
+**Given** the fetch phase runs
+**When** completed
+**Then** a single summary line is printed to stdout: `fetched N repositories (M failed, warnings above)` — even if M is 0, the summary line prints for visibility
+
+**Implementation Notes:**
+- New package `internal/gitfetch/` with `FetchAll(ctx context.Context, paths []string) []FetchResult`. `FetchResult` contains `Path`, `Err`, `Stderr`.
+- Concurrency: bounded worker pool via `golang.org/x/sync/errgroup` with `SetLimit(4)`.
+- Git repo detection: a path is a git repo if `filepath.Join(path, ".git")` exists (file or directory — worktrees use a `.git` file pointing at the git dir).
+- Invoke `git fetch --all` via `os/exec` with `Dir` set to the repo path; capture combined stderr for the warning message.
+- Flag registration in `cmd/run.go`; resolution order: build-if-needed → mount assembly → **fetch if --fetch** → secret validation → `docker run`.
+- Tests: unit tests in `internal/gitfetch/` using `t.TempDir()` to create git repos on the fly (testable without a remote via `git init --bare` and local remote configuration). Integration test with a bmad_repos fixture verifying the sandbox sees the freshly fetched refs.
+
+## Epic 14: Pre-Installed Validation & Exploration Toolchain
+
+Agents spending turns on `apt-get install kubectl` or discovering that `fd` isn't installed are agents losing time to infrastructure instead of solving the problem. This epic ships a curated, version-pinned set of DevOps validation tools and code exploration tools in the base sandbox image. All tools run without credentials (they're used for local validation, not remote orchestration) and their caches/data directories are pre-owned by the sandbox user.
+
+### Story 14.1: Pre-Installed DevOps Validation Toolchain
+
+As a developer,
+I want `kubectl`, `helm`, `kustomize`, `yq`, `jq`, `opentofu`, `tflint`, `kubeconform`, `kube-linter`, `trivy`, `flux`, and `sops` pre-installed in the sandbox image at pinned versions,
+So that the agent can validate Kubernetes and Terraform work without spending turns on tool installation.
+
+**Acceptance Criteria:**
+
+**Given** a newly built sandbox image
+**When** the agent invokes any of the listed tools with `--version` or `version`
+**Then** each tool responds successfully and reports the pinned version
+
+**Given** the agent runs `trivy image <some-image>` for the first time inside the sandbox
+**When** trivy tries to download its vulnerability database to the default cache location
+**Then** the download succeeds — the cache directory (`~/.cache/trivy` or equivalent) is pre-created and owned by the sandbox user
+
+**Given** the agent runs `helm install --dry-run` or `kustomize build`
+**When** the render is produced
+**Then** the operation completes locally without requiring cluster credentials
+
+**Given** the `embed/Dockerfile.tmpl` file
+**When** inspected
+**Then** each of the twelve tools is installed at an explicit pinned version (no `latest`, no `@latest`, no GitHub API `latest` endpoint) declared in a single place
+
+**Given** the Dockerfile template
+**When** inspected
+**Then** a comment block at the top of the toolchain section documents each pinned version, the upstream release page used to discover it, and the update procedure (including how to obtain multi-arch digests where applicable)
+
+**Given** the sandbox image is built on both amd64 and arm64 hosts
+**When** the toolchain installation runs
+**Then** each tool's binary is downloaded for the correct architecture (via `$(dpkg --print-architecture)` or `$(uname -m)` detection, matching each project's release naming convention)
+
+**Given** a content hash is computed for the image
+**When** a pinned version is bumped in `embed/Dockerfile.tmpl`
+**Then** the content hash changes and the next `asbox build` / `asbox run` triggers a full rebuild — matching the existing reproducibility contract (NFR12, NFR16)
+
+**Given** the integration test suite
+**When** a new "toolchain smoke test" is added under `integration/toolchain_test.go`
+**Then** it asserts each of the twelve tools runs `--version` successfully inside a freshly launched sandbox
+
+**Implementation Notes:**
+- Add a new RUN block at the top of `embed/Dockerfile.tmpl`, after the base image and common apt tooling, named (via comment) `validation_tools`.
+- Prefer apt for jq, yq (from `mikefarah/yq` if Ubuntu package is outdated — pin the binary download instead).
+- Use versioned GitHub-release tarballs for: kubectl, helm, kustomize, opentofu, tflint, kubeconform, kube-linter, trivy, flux, sops, yq. Download to `/tmp`, extract, move binary to `/usr/local/bin`, `chmod +x`, clean up.
+- Multi-arch: use `$(dpkg --print-architecture)` for tools that publish `amd64`/`arm64` releases, `$(uname -m)` for those publishing `x86_64`/`aarch64`. A comment next to each download line documents which naming scheme is used.
+- Pre-create cache/data directories: `~/.cache/trivy`, `~/.cache/helm`, `~/.kube`, `~/.terraform.d`, `~/.config/sops`. Chown to `sandbox:sandbox` in the Dockerfile (happens before user switch).
+- No `curl | bash` installers for any tool in this story.
+- Extend the Dockerfile template comment header to include the version update procedure.
+- Update `embed/agent-instructions.md.tmpl` with a brief "Installed Tooling" section listing what's available so the agent doesn't re-discover.
+
+### Story 14.2: Pre-Installed Code Exploration Tools
+
+As a developer,
+I want `ripgrep`, `fd`, `ast-grep`, and `universal-ctags` pre-installed in the sandbox image at pinned versions,
+So that the agent can navigate and search repositories efficiently without falling back to `find` or building its own symbol maps.
+
+**Acceptance Criteria:**
+
+**Given** a newly built sandbox image
+**When** the agent invokes `rg --version`, `fd --version`, `ast-grep --version`, or `ctags --version`
+**Then** each tool responds successfully and reports the pinned version
+
+**Given** the agent runs `rg <pattern>` inside a mounted project
+**When** the search runs
+**Then** `.gitignore` is respected by default and the pattern matches across the repo
+
+**Given** the agent runs `fd <pattern>` inside a mounted project
+**When** the search runs
+**Then** files matching the pattern are returned, honoring `.gitignore`
+
+**Given** the agent runs `ast-grep run -p '<pattern>' --lang <lang>` inside a mounted project
+**When** the search runs
+**Then** structural matches are returned (this replaces plain-text grep when the agent needs semantic matches)
+
+**Given** the `embed/Dockerfile.tmpl` file
+**When** inspected
+**Then** each of the four tools is installed at an explicit pinned version in the same comment-documented block as the DevOps tools (single source of truth for pinned versions)
+
+**Given** the integration test suite
+**When** the toolchain smoke test runs
+**Then** each of the four exploration tools is covered alongside the DevOps tools
+
+**Implementation Notes:**
+- Add exploration tools to the same RUN block as DevOps tools (or an adjacent block labelled `exploration_tools` in a comment — decide based on which keeps the Dockerfile readable).
+- ripgrep, fd-find, universal-ctags: apt packages on Ubuntu 24.04 are at acceptable versions — apt install with explicit version pins if possible.
+- ast-grep: versioned GitHub-release binary download — apt does not ship it.
+- Document each version in the same comment header as story 14.1.
+- Git's `git ls-files` is already present via the existing git install (FR23) — explicitly call this out in the `embed/agent-instructions.md.tmpl` "Installed Tooling" section so the agent prefers it for clean repo traversal.
+
+## Epic 15 (Research/POC): Local Kubernetes Cluster Integration
+
+Agents building for EKS and OpenShift today validate Kubernetes work through `helm --dry-run` and `kustomize build`, but those renders don't catch CRD round-trip issues or API-server validation errors. A disposable local Kubernetes cluster reachable from the sandboxed agent would close that gap — but it touches the isolation model (kubeconfig grants cluster-admin, the cluster is a new attack surface). This is a research epic: produce a spike, a prototype, and a security analysis before committing to any productionization path.
+
+### Story 15.1: Kubernetes Integration Research Spike
+
+As a maintainer,
+I want a structured spike that evaluates three Kubernetes integration tracks and produces a recommendation,
+So that I can decide whether (and how) to productionize local cluster access without committing to a path blindly.
+
+**Acceptance Criteria:**
+
+**Given** the spike is kicked off
+**When** research is conducted
+**Then** each of three tracks is evaluated: (a) `kind` cluster inside the sandbox via inner Podman, (b) `kind`/`k3s` cluster provisioned on the host with kubeconfig injected into the sandbox via an opt-in mount, (c) at least one alternative surfaced during research (e.g., `vcluster`, shared remote cluster with per-user namespace)
+
+**Given** each track is evaluated
+**When** the findings are written up
+**Then** the write-up for each track includes: startup time estimate, isolation boundary analysis (what does the agent now have access to that it didn't before), failure modes, disposal/cleanup story, and compatibility with the existing `auto_isolate_deps` and `bmad_repos` features
+
+**Given** Track B (host-side cluster with kubeconfig injection) is evaluated
+**When** the security analysis is written
+**Then** it explicitly addresses: the trust grant implied by injecting a kubeconfig with cluster-admin into the sandbox, how an agent deliberately or accidentally misbehaving could affect host resources, and what mitigations (scoped kubeconfig, per-session cluster, etc.) make Track B acceptable
+
+**Given** the spike produces a recommendation
+**When** presented
+**Then** the recommendation identifies: the preferred track with rationale, the minimum changes needed to implement it (config surface, new flags, Dockerfile additions), and explicit next-step stories
+
+**Given** the spike includes a prototype
+**When** delivered
+**Then** at least one track has a working prototype (a feature branch or draft PR) demonstrating the agent can render and apply a manifest against a cluster and observe the resulting state — enough to confirm feasibility, not production-ready
+
+**Given** the spike is complete
+**When** the user reviews the output
+**Then** productionization is an explicit decision gate — no additional work is done on Kubernetes integration without sign-off on the recommended track
+
+**Implementation Notes:**
+- Output artifact: `_bmad-output/planning-artifacts/k8s-integration-spike-<date>.md` with sections: Context, Evaluation Methodology, Track A Analysis, Track B Analysis, Track C Analysis, Security Analysis (Track B focus), Recommendation, Next Steps.
+- Prototype artifact: a branch (not merged) that demonstrates the recommended track working end-to-end with a sample manifest.
+- This story is intentionally open-ended — do not pre-commit to implementation details. The goal is decision-quality information, not implementation.
+- Follow-up stories (15.2+) will be defined after the spike based on the recommendation.

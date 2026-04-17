@@ -19,8 +19,12 @@ stepsCompleted:
   - step-e-03-edit
 inputDocuments: []
 workflowType: 'prd'
-lastEdited: '2026-04-11'
+lastEdited: '2026-04-17'
 editHistory:
+  - date: '2026-04-17'
+    changes: 'Folded future-work.md backlog into PRD. New FRs: FR60 (-a short flag), FR61 (positional agent arg with mutual exclusion), FR62 (pre-installed DevOps validation tools), FR63 (pre-installed code exploration tools), FR64 (branch-management guidance in bmad_repos agent instructions), FR65 (--fetch flag for upstream sync across bmad_repos), FR66 (exploratory local Kubernetes cluster integration). New NFR16 (pinned versions for pre-installed toolchain). Updated CLI Interface, Development Toolchain, bmad_repos behavior, and Phase 2 scope. Spawns Epics 12, 13, 14, 15.'
+  - date: '2026-04-17'
+    changes: 'Made implicit bmad_repos path validation explicit in PRD and architecture. Strengthened FR52 with fail-closed validation requirement (missing path or non-directory aborts launch with exit code 1). Contrast with host_agent_config silent-skip (FR9d, FR45) now documented in Runtime behavior narrative and architecture Cross-Cutting Concerns. No new FRs — codifies existing implementation behavior in internal/mount/bmad_repos.go.'
   - date: '2026-04-14'
     changes: 'Course correction: Codex CLI agent support. Added codex to agent names, config registry, host_agent_config mappings, instruction files. New FR19a (Codex launch command). Modified FR7, FR9d, FR44, FR45, FR58. Updated Configuration Surface, Journey Requirements, Technical Architecture sections. Per sprint-change-proposal-2026-04-14.md.'
   - date: '2026-04-11'
@@ -234,7 +238,7 @@ The asbox configuration file (`.asbox/config.yaml` by default) is the primary in
   - `codex` -> `codex --dangerously-bypass-approvals-and-sandbox` (approvals and sandbox bypassed, asbox provides isolation). Installed via npm global install (`@openai/codex`).
 - **Host agent config:** Boolean flag (default: true) that automatically mounts the host agent's configuration directory into the container for OAuth token synchronization. Paths are resolved automatically based on the selected agent (claude: `~/.claude` -> `/opt/claude-config`, gemini: `~/.gemini` -> `/opt/gemini-config`, codex: `~/.codex` -> `/opt/codex-config`). Sets the corresponding config directory environment variable. If the host directory does not exist (agent not set up on host), the mount is silently skipped.
 - **Project name:** Optional override for the project identifier used in image and volume naming. Defaults to the parent directory name of the `.asbox/` folder, sanitized to lowercase alphanumeric with hyphens.
-- **BMAD multi-repo workflow (`bmad_repos`):** A list of local paths to checked-out repositories. When configured, the system automatically creates mounts for each repository into `/workspace/repos/<repo_name>` inside the sandbox container. An agent configuration file (e.g., `CLAUDE.md`) is generated and mounted that instructs the agent to perform git operations and code changes within the relevant repositories under the `repos/` directory. This enables development workflows that span multiple repositories as a unified workspace.
+- **BMAD multi-repo workflow (`bmad_repos`):** A list of local paths to checked-out repositories. When configured, the system automatically creates mounts for each repository into `/workspace/repos/<repo_name>` inside the sandbox container. An agent configuration file (e.g., `CLAUDE.md`) is generated and mounted that instructs the agent to perform git operations and code changes within the relevant repositories under the `repos/` directory, **and includes opinionated branch-management guidance** (per-task feature branches, stashing in-flight work, resuming after restart) so the agent manages cross-repo state deterministically. This enables development workflows that span multiple repositories as a unified workspace. Upstream synchronization across all listed repositories is available via the `--fetch` flag on `asbox run` — the sandboxed agent cannot reach the host network's SSH/credential store for git operations, so host-side fetch is the mechanism.
 
 Example structure:
 ```yaml
@@ -279,14 +283,19 @@ When `auto_isolate_deps` is enabled, asbox scans all mounted project paths at la
 **Binary:** `asbox` (Go CLI)
 
 **Commands:**
-- `asbox build` -- Builds the sandbox container image from configuration. Reads `.asbox/config.yaml` by default, override with `-f path/to/config.yaml`.
-- `asbox run` -- Builds if image not present, then launches the sandbox in TTY mode with the configured agent. Override config with `-f`. Override agent with `--agent`. The container runs interactively; Ctrl+C stops it.
+- `asbox build` -- Builds the sandbox container image from configuration. Reads `.asbox/config.yaml` by default, override with `-f path/to/config.yaml`. `--no-cache` forces a full rebuild.
+- `asbox run [agent]` -- Builds if image not present, then launches the sandbox in TTY mode with the configured agent. Override config with `-f`. Override agent with `-a`/`--agent` **or** via positional argument (e.g., `asbox run codex`); specifying both forms is a usage error. `--fetch` runs `git fetch --all` in every configured `bmad_repos` entry (and the primary mount if it is a git repo) before launching the agent. The container runs interactively; Ctrl+C stops it.
 - `asbox init` -- Generates a starter `.asbox/config.yaml` with sensible defaults and inline comments.
 
 **Flags:**
 - `-f, --file` -- Path to config file (default: `.asbox/config.yaml`)
-- `--agent` -- Override the default agent for this session (must be in `installed_agents`)
+- `-a, --agent` -- Override the default agent for this session (must be in `installed_agents`)
+- `--fetch` (on `asbox run`) -- Run `git fetch --all` in every mounted repository before launching the agent, so the agent has up-to-date remote refs even on non-current branches. No-op when no git repositories are mounted. Network failures are logged but non-fatal (supports offline use)
+- `--no-cache` (on `asbox build` and `asbox run`) -- Skip the content-hash existence check and pass `--no-cache` to the underlying Docker build
 - `--help` for usage information
+
+**Positional Arguments:**
+- `asbox run [agent]` -- Optional positional agent name. Must match an entry in `installed_agents`. When provided together with `-a`/`--agent`, the CLI exits with code 2 and prints a usage error.
 
 **Exit Codes:**
 - `0` -- Success
@@ -326,6 +335,8 @@ When `auto_isolate_deps` is enabled, asbox scans all mounted project paths at la
 - Docker Compose v2 installed as standalone binary
 - MCP servers installed at build time; MCP manifest embedded at `/etc/sandbox/mcp-servers.json`
 - Agent CLIs installed at build time from `installed_agents` list: Claude Code via official Anthropic install script, Gemini CLI via npm (`@google/gemini-cli`), Codex CLI via npm (`@openai/codex`). Multiple agents can be installed in the same image
+- Pre-installed DevOps validation toolchain at pinned versions: `kubectl`, `helm`, `kustomize`, `yq`, `jq`, `opentofu`, `tflint`, `kubeconform`, `kube-linter`, `trivy`, `flux`, `sops`. Installation prefers apt where packages exist at the required version; falls back to versioned GitHub-release binary downloads with multi-arch detection. Per-tool cache directories (e.g., `~/.cache/trivy`) are created and owned by the sandbox user
+- Pre-installed code exploration toolchain at pinned versions: `ripgrep`, `fd`, `ast-grep`, `universal-ctags`
 - Agent environment instruction files (`CLAUDE.md`, `GEMINI.md`, and/or `CODEX.md`) installed to agent config directory
 - Git wrapper and isolation boundaries baked into the image
 - Layer caching for fast rebuilds when only configuration changes
@@ -343,7 +354,8 @@ When `auto_isolate_deps` is enabled, asbox scans all mounted project paths at la
 - MCP manifest merge at runtime: build-time manifest merged with project `.mcp.json` if present; project config takes precedence on name conflicts
 - Private network bridge for inner container communication
 - When `auto_isolate_deps` is enabled: at launch, scan all mounted paths — primary mounts and `bmad_repos` — for `package.json` files, derive `node_modules/` sibling paths, and create named Docker volume mounts (`-v asbox-<project>-<path>-node_modules:<container-path>/node_modules`) on the `docker run` invocation. For bmad_repos, container paths are derived from `/workspace/repos/<basename>`. Entrypoint fixes ownership of named volume mounts for the unprivileged sandbox user. Log each discovered mount. On fresh projects with no `package.json`, no mounts are added -- the agent creates Linux-native dependencies from scratch.
-- When `bmad_repos` is configured: each listed repository path is mounted into `/workspace/repos/<repo_name>` inside the container. An agent configuration file (e.g., `CLAUDE.md`) is generated from a Go template containing the list of mounted repositories and instructions for the agent to perform git operations and code changes within the `repos/` directory. This file is mounted into the container at the agent's expected configuration location.
+- When `bmad_repos` is configured: each listed repository path is mounted into `/workspace/repos/<repo_name>` inside the container. Every entry is validated at launch — the path must exist and must be a directory; a missing path or a non-directory entry aborts the launch with exit code 1 and a message naming the offending path (`"error: bmad_repos path '<path>' not found. Check bmad_repos in .asbox/config.yaml"`). This is a fail-closed contract: the agent's workspace is either complete or the sandbox does not start, so the agent never operates with a subset of the declared repositories. An agent configuration file (e.g., `CLAUDE.md`) is generated from a Go template containing the list of mounted repositories, instructions for the agent to perform git operations and code changes within the `repos/` directory, and explicit branch-management guidance (feature-branch creation, stashing, cross-session resume). This file is mounted into the container at the agent's expected configuration location.
+- When `--fetch` is passed to `asbox run`: after config parse and mount assembly, and before the `docker run` invocation, the CLI iterates the resolved list of mounted git repositories (primary mount if a git repo + every `bmad_repos` entry) and runs `git fetch --all` on each — in parallel where safe — using the host's existing git credentials (SSH keys, credential helper). The fetch happens on the host, not inside the sandbox, by design: the sandbox has no access to host credentials. Per-repository failures are logged with the repo path and the underlying git error but do not abort the launch, so offline use continues to work.
 
 ### Installation & Distribution
 
@@ -423,6 +435,7 @@ All of the following are non-negotiable for MVP -- removing any one breaks the c
 - Session persistence options (ephemeral vs persistent lifecycle)
 - Additional MCP integrations (browser automation beyond Playwright, file search, etc.)
 - Audit trail and agent activity logging for team visibility
+- **Local Kubernetes cluster integration (POC, FR66):** research spike to evaluate whether the agent should have access to a disposable k8s cluster for end-to-end validation of EKS/OpenShift-targeted work. Three tracks on the table (in-sandbox `kind`, host-side `k3s`/`kind` with injected kubeconfig, alternatives TBD). Productionization gated on spike outcome.
 
 ### Phase 3: Scale & Orchestration
 
@@ -462,6 +475,8 @@ All of the following are non-negotiable for MVP -- removing any one breaks the c
 - FR9c: The system logs all auto-detected dependency isolation mounts at launch so the developer has visibility into what was isolated
 - FR9d: Developer can enable or disable host agent configuration directory mounting via `host_agent_config` boolean (default: true). When enabled, the system automatically resolves the correct source and target paths based on the selected agent at runtime (claude: `~/.claude` -> `/opt/claude-config`, gemini: `~/.gemini` -> `/opt/gemini-config`, codex: `~/.codex` -> `/opt/codex-config`). If the host directory does not exist, the mount is silently skipped
 - FR9e: Developer can optionally set `project_name` in configuration to override the default project identifier used for image and volume naming
+- FR60: Developer can use `-a` as a short alias for `--agent` on `asbox run` (e.g., `asbox run -a codex`). Both forms must accept the same validation and produce identical behavior
+- FR61: Developer can specify the agent as a positional argument on `asbox run` (e.g., `asbox run codex`), avoiding flag friction for the common case of switching the runtime agent. The positional value must match an entry in `installed_agents`. Providing both a positional agent and the `-a`/`--agent` flag exits with code 2 and prints a usage error naming both inputs — no implicit precedence between the two forms
 
 ### Sandbox Lifecycle
 
@@ -473,6 +488,7 @@ All of the following are non-negotiable for MVP -- removing any one breaks the c
 - FR15: System validates that Docker is present before proceeding
 - FR16: System validates that all declared secrets are set in the host environment before launching
 - FR16a: When `auto_isolate_deps` is enabled, the system creates named Docker volume mounts for each detected dependency directory during sandbox launch and ensures correct ownership for the unprivileged sandbox user
+- FR65: Developer can pass `--fetch` to `asbox run` to execute `git fetch --all` inside each mounted repository (`bmad_repos` entries and the primary mount when it is a git repository) before the agent is launched. Fetch runs on the host, in parallel where possible, so the agent sees up-to-date remote refs across all branches — including ones not currently checked out. Per-repository network failures are logged but do not abort the launch (supports offline use). Without `--fetch`, no network operation occurs at launch
 
 ### Agent Runtime
 
@@ -489,6 +505,8 @@ All of the following are non-negotiable for MVP -- removing any one breaks the c
 - FR23: Agent can use git for local operations (add, commit, log, diff, branch, checkout, merge, amend)
 - FR24: Agent can access the internet for fetching documentation, packages, and dependencies
 - FR25: Agent can use common CLI tools (curl, wget, dig, etc.)
+- FR62: Agent can use pre-installed DevOps validation tools without authenticating to external systems: `kubectl`, `helm`, `kustomize`, `yq`, `jq`, `opentofu`, `tflint`, `kubeconform`, `kube-linter`, `trivy`, `flux`, `sops`. Tools are invoked for local validation tasks (rendering helm charts, linting terraform, scanning images for known CVEs, kube-conformance checks). The sandbox user has write access to each tool's default cache/data directory (e.g., `~/.cache/trivy` for the vulnerability DB) so first-use downloads succeed without root
+- FR63: Agent can use pre-installed code exploration tools to navigate and search repositories efficiently: `ripgrep` (fast recursive search with `.gitignore` awareness), `fd` (fast parallel file finder), `ast-grep` (structural/AST-based code search), and `universal-ctags` (cross-language symbol map). Combined with the existing `git` toolchain (which covers `git ls-files` for clean repo traversal per FR23), these cover the agent's repository-exploration needs without trial-and-error tool discovery
 - FR26: Agent can build Docker images from Dockerfiles inside the sandbox
 - FR27: Agent can run `docker compose up` to start multi-service applications inside the sandbox
 - FR28: Agent can reach application ports of services running in inner containers
@@ -522,14 +540,16 @@ All of the following are non-negotiable for MVP -- removing any one breaks the c
 - FR49: System aligns sandbox user UID/GID with host user at container startup to ensure correct file permissions on mounted directories
 - FR50: All supporting files (Dockerfile template, entrypoint.sh, git-wrapper.sh, healthcheck-poller.sh, agent-instructions.md, starter config template) are embedded in the Go binary via the `embed` package and require no external file dependencies
 - FR51: Developer can configure `bmad_repos` as a list of local paths to checked-out repositories in `.asbox/config.yaml`
-- FR52: When `bmad_repos` is configured, the system automatically creates mount mappings for each repository into `/workspace/repos/<repo_name>` inside the sandbox container
+- FR52: When `bmad_repos` is configured, the system automatically creates mount mappings for each repository into `/workspace/repos/<repo_name>` inside the sandbox container. Every declared path MUST resolve to an existing directory on the host at launch time — if any path is missing or is not a directory, the launch is aborted with exit code 1 and a descriptive error naming the offending path and the config field. No silent skip, no partial workspace: the sandbox either launches with the full declared repository set visible to the agent or not at all. This is deliberately opposite to `host_agent_config` (FR9d, FR45), which silently skips missing host directories
 - FR53: When `bmad_repos` is configured, the system generates an agent configuration file (e.g., `CLAUDE.md`) instructing the agent that git operations and code changes should be executed within the relevant repositories under the `repos/` directory, and mounts it into the container
+- FR64: The generated `bmad_repos` agent instruction file includes explicit, opinionated branch-management guidance so the agent can manage cross-repository state without trial-and-error: how to create per-task feature branches in each affected repo, how to stash or park in-flight work to keep working trees clean between tasks, and how to resume work after a sandbox restart. Guidance is a single convention (not a menu of options) so agent behavior is deterministic across sessions
 - FR54: The system is distributed as a single statically-linked Go binary with no external runtime dependencies beyond Docker
 - FR55: Developer can pass `--no-cache` to `asbox build` (and implicitly to `asbox run`) to bypass the content-hash image existence check and pass `--no-cache` to the underlying Docker build, forcing a complete image rebuild with no cached layers
 - FR56: Developer can specify which agents to install in the sandbox image via `installed_agents` list in configuration. At least one agent must be listed. The Dockerfile template iterates over this list to install all specified agents at build time
 - FR57: Developer can override the default agent at runtime via `asbox run --agent <name>`. The specified agent must be in the `installed_agents` list. This allows switching agents without editing configuration
 - FR58: Agent names use short form in configuration and CLI: `claude` (maps to Claude Code CLI), `gemini` (maps to Gemini CLI), and `codex` (maps to Codex CLI). The system maps short names to full CLI commands internally
 - FR59: The system maintains an agent config registry mapping each agent to its default host config directory, container target path, and config environment variable. This registry drives automatic `host_agent_config` path resolution
+- FR66 (exploratory): System supports experimental integration paths for a local Kubernetes cluster reachable from inside the sandbox so the agent can validate Kubernetes-targeted work (helm chart rendering, kustomize builds, CRD round-trips) against a real API server. Target consumers are engineers building for EKS/OpenShift who need a disposable cluster for pre-commit verification. Treated as research/POC rather than a committed deliverable; at least three evaluation tracks are in scope: (a) `kind` running inside the sandbox via inner Podman — isolated from host but not reachable from outside; (b) `k3s` or `kind` provisioned on the host with kubeconfig injected into the sandbox via opt-in mount — less isolated, fully disposable; (c) alternative approaches TBD from the spike. A decision to productionize any track is gated on the spike outcome
 
 ## Non-Functional Requirements
 
@@ -558,3 +578,4 @@ The security model protects against accidental leakage from AI agents that hallu
 - NFR13: The CLI fails fast with error messages that name the missing dependency, unset secret, or invalid field and state the required fix action. Each error category returns a distinct exit code (1-4) for programmatic detection
 - NFR14: A crashed or Ctrl+C'd sandbox leaves no orphaned containers or dangling networks on the host. Tini as PID 1 ensures proper signal forwarding and cleanup of child processes
 - NFR15: Integration test suite covers all supported use cases (sandbox lifecycle, mounts, secrets, isolation boundaries, inner containers, MCP, auto_isolate_deps, bmad_repos) with parallel test execution via Go's testing framework
+- NFR16: All pre-installed DevOps validation tools (FR62) and code exploration tools (FR63) are installed at explicit pinned versions declared in a single place in `embed/Dockerfile.tmpl`. Version bumps are an explicit change that triggers a content-hash rebuild (per NFR12). A comment block documents the update process — which upstream release pages to consult and how to verify new versions
