@@ -86,9 +86,10 @@ FR60: Developer can use `-a` as a short alias for `--agent` on `asbox run`
 FR61: Developer can specify the agent as a positional argument on `asbox run`; providing both positional and `-a`/`--agent` exits with code 2
 FR62: Sandbox image includes pre-installed DevOps validation tools at pinned versions (kubectl, helm, kustomize, yq, jq, opentofu, tflint, kubeconform, kube-linter, trivy, flux, sops)
 FR63: Sandbox image includes pre-installed code exploration tools at pinned versions (ripgrep, fd, ast-grep, universal-ctags)
-FR64: Generated bmad_repos agent instructions include explicit branch-management guidance (feature branches, stashing, cross-session resume)
-FR65: Developer can pass `--fetch` to `asbox run` to run host-side `git fetch --all` across all mounted repositories before the agent launches
+FR64: Generated bmad_repos agent instructions include explicit branch-management guidance (feature branches created from `origin/<default>`, stashing, cross-session resume)
+FR65: Developer can pass `--fetch` to `asbox run` to run host-side `git fetch origin` (not `--all`) across all mounted repositories before the agent launches, with a pre-fetch anchor line (announcing repo count, timeout, concurrency), per-repo timeout (with `ASBOX_FETCH_TIMEOUT` override surfaced inline in timeout failure messages), canonical-path dedup, buffered output, a short happy-path summary (`fetched N/N repositories`) that expands to name non-zero skip categories when present, and a `WARNING:`-prefixed stderr summary on partial failure. Updates `refs/remotes/origin/*` only — never the working tree
 FR66 (exploratory): System supports experimental integration paths for a local Kubernetes cluster — research spike with three evaluation tracks (in-sandbox kind, host k3s with kubeconfig injection, TBD alternatives)
+FR67: `asbox run` warns non-fatally at launch when any mounted git repository has a dirty working tree (modified/staged/untracked, ignoring `.gitignore`d files); suppressible via `ASBOX_SUPPRESS_DIRTY_WARNING=1` — and the warning block itself self-advertises the suppression env var as its closing line, so users do not have to read docs to silence noise in CI
 
 ### NonFunctional Requirements
 
@@ -225,8 +226,9 @@ N/A — asbox is a CLI tool with no GUI. No UX design document applicable.
 | NFR14 | Epic 11 | Concurrent sandbox session support |
 | FR60 | Epic 12 | `-a` short flag for agent override |
 | FR61 | Epic 12 | Positional agent argument with mutual exclusion |
-| FR64 | Epic 13 | Branch-management guidance in bmad_repos agent instructions |
-| FR65 | Epic 13 | `--fetch` flag for host-side upstream sync |
+| FR64 | Epic 13 | Branch-management guidance in bmad_repos agent instructions (incl. `origin/<default>` basing) |
+| FR65 | Epic 13 | `--fetch` flag for host-side upstream sync (`git fetch origin`, refs-only, timeout, dedup, anchor line, short summary) |
+| FR67 | Epic 13 | Dirty-working-tree warning at launch (non-fatal, suppressible) |
 | FR62 | Epic 14 | Pre-installed DevOps validation toolchain |
 | FR63 | Epic 14 | Pre-installed code exploration tools |
 | NFR16 | Epic 14 | Pinned versions for pre-installed toolchain |
@@ -291,8 +293,8 @@ Reduce friction on the most common runtime choice (which agent to launch) by add
 **FRs covered:** FR60, FR61
 
 ### Epic 13: Multi-Repo State Management
-A developer working across multiple repositories via `bmad_repos` gets two improvements: the generated agent instructions include opinionated branch-management conventions so the agent doesn't have to improvise, and `asbox run --fetch` syncs every mounted repository with its remote before the sandbox starts — solving the "sandbox can't reach host git credentials" problem by performing fetch on the host side.
-**FRs covered:** FR64, FR65
+A developer working across multiple repositories via `bmad_repos` gets three improvements: the generated agent instructions include opinionated branch-management conventions (including branching from `origin/<default>` rather than stale local refs), `asbox run --fetch` syncs every mounted repository's `origin` with its remote before the sandbox starts — solving the "sandbox can't reach host git credentials" problem by performing fetch on the host side — and `asbox run` surfaces a warning when any mounted repository has a dirty working tree, protecting against the "uncommitted changes from a prior asbox session" contamination scenario.
+**FRs covered:** FR64, FR65, FR67
 
 ### Epic 14: Pre-Installed Validation & Exploration Toolchain
 The sandbox image ships with a pinned DevOps validation toolchain (kubectl, helm, kustomize, yq, jq, opentofu, tflint, kubeconform, kube-linter, trivy, flux, sops) and a pinned code exploration toolchain (ripgrep, fd, ast-grep, universal-ctags). Agents can validate Kubernetes/Terraform work and navigate repos efficiently without spending turns on package installation or tool discovery.
@@ -1520,7 +1522,9 @@ So that I don't have to type `--agent` every time I want to try a different agen
 
 ## Epic 13: Multi-Repo State Management
 
-Developers running `asbox` with `bmad_repos` across multiple repositories today have two friction points: (1) the agent has to improvise branch-management conventions each session (feature branch? stash? pick up from last branch?), which produces inconsistent behavior; and (2) the sandboxed agent has no access to host SSH keys or git credential helpers, so it cannot `git fetch` private remotes — the developer has to remember to fetch each repo on the host before starting. This epic addresses both by baking branch conventions into the generated agent instructions and by adding a `--fetch` flag that runs host-side `git fetch --all` across every mounted repository before the sandbox starts.
+Developers running `asbox` with `bmad_repos` across multiple repositories today have three friction points: (1) the agent has to improvise branch-management conventions each session (feature branch? stash? pick up from last branch?), which produces inconsistent behavior; (2) the sandboxed agent has no access to host SSH keys or git credential helpers, so it cannot `git fetch` private remotes — the developer has to remember to fetch each repo on the host before starting; and (3) because `bmad_repos` paths are shared checkouts that may have been touched by prior asbox sessions or manual work, the agent can silently start on top of uncommitted changes from an unrelated task, contaminating the new session's state. This epic addresses all three: baking branch conventions (including `origin/<default>`-based branching) into the generated agent instructions, adding a `--fetch` flag that runs host-side `git fetch origin` across every mounted repository before the sandbox starts (touching only `refs/remotes/origin/*` — never the working tree), and surfacing a non-fatal warning when any mounted repo enters the sandbox with a dirty working tree.
+
+**Scope boundary (explicit):** `--fetch` updates remote-tracking refs only. It does NOT pull, merge, rebase, switch branches, touch the working tree, or resolve staleness between local and remote branches. Reconciling local branches with fetched refs is the agent's responsibility, guided by story 13.1's branch-management conventions. This narrowness is deliberate — widening `--fetch` to include merge/pull would couple host-side orchestration to branch policy, which belongs to the agent inside the sandbox.
 
 ### Story 13.1: Branch-Management Guidance in Generated Agent Instructions
 
@@ -1546,14 +1550,18 @@ So that every agent session manages cross-repo branch state the same way without
 **When** documented
 **Then** it uses a template placeholder (e.g., `asbox/<short-task-slug>`) and the instruction tells the agent to substitute a short slug derived from the task at hand
 
+**Given** the feature-branch creation guidance
+**When** documented
+**Then** it explicitly instructs the agent to base new branches on `origin/<default-branch>` (not on the local default branch) so that a preceding host-side fetch (story 13.2) actually translates into up-to-date working state — this closes the loop between 13.1 and 13.2 and prevents the agent from silently branching off stale local refs
+
 **Given** the instruction file is regenerated on every `asbox run`
 **When** the repo list or project name changes
 **Then** the branch-management section remains consistent — no drift from prior sessions
 
 **Implementation Notes:**
 - Extend `embed/agent-instructions.md.tmpl` with a `{{if .HasBmadRepos}} ... {{end}}` block containing the Branch Management section.
-- The guidance should call out the three topics explicitly (feature branch, stash, resume) with concrete shell snippets.
-- No Go code changes needed — purely a template edit — but the existing template test (`internal/mount/bmad_repos_test.go`) should be extended with a case asserting the Branch Management section is present when `bmad_repos` is non-empty and absent otherwise.
+- The guidance should call out the three topics explicitly (feature branch, stash, resume) with concrete shell snippets. The feature-branch snippet MUST show `git switch -c asbox/<slug> origin/<default>` form, not `git switch -c asbox/<slug>` from current HEAD.
+- No Go code changes needed — purely a template edit — but the existing template test (`internal/mount/bmad_repos_test.go`) should be extended with a case asserting the Branch Management section is present when `bmad_repos` is non-empty and absent otherwise, and that the rendered feature-branch guidance references `origin/<default>`.
 
 ### Story 13.2: `--fetch` Flag for Host-Side Upstream Sync
 
@@ -1565,13 +1573,33 @@ So that the sandboxed agent has current remote refs on all branches — includin
 
 **Given** the developer runs `asbox run --fetch` with `bmad_repos` listing three repositories
 **When** the CLI begins launch orchestration
-**Then** before `docker run` is invoked, the CLI runs `git fetch --all` on each of the three `bmad_repos` paths using the developer's host credentials, and on the primary mount if it is a git repository
+**Then** before `docker run` is invoked, the CLI runs `git fetch origin` on each of the three `bmad_repos` paths using the developer's host credentials, and on the project directory mount (the config's primary mount — resolved to the directory containing `.asbox/`) if it is a git repository
+
+**Given** the fetch phase is about to begin
+**When** workers dispatch
+**Then** a single informational anchor line prints to stdout *before* any per-repo output: `fetching N repositories (timeout 60s each, 4 concurrent)...` where `N` reflects the deduplicated repo count and the timeout/concurrency values reflect actual runtime config. The anchor line must print even if N is 1. Its purpose is to prevent the buffered-output silence from being read as a hang on slow fetches, and to surface the timeout/concurrency defaults without requiring a `--help` consult
+
+**Given** a repository has no remote named `origin`
+**When** the fetch phase runs against it
+**Then** the path is skipped with an info-level log (`info: no origin remote in <path>, skipping fetch`) and is counted as skipped (not failed) in the summary
+
+**Given** the fetch phase runs
+**When** `--fetch` touches any repository
+**Then** only `refs/remotes/origin/*` and the object database are updated — the working tree, index, `HEAD`, local branches (`refs/heads/*`), stash, and any `.git/rebase-*`, `.git/merge-*`, or `.git/cherry-*` state are left unmodified. This is guaranteed by using `git fetch` (never `pull`, `merge`, `rebase`, `checkout`, or `reset`)
 
 **Given** `--fetch` is set and one of the repositories is not a git repository (no `.git` entry)
 **When** the fetch phase runs
-**Then** that path is skipped silently — no error, no warning
+**Then** that path is skipped silently and counted as skipped in the summary — no warning, no error
 
-**Given** `--fetch` is set and one of the repositories fails to fetch (network error, auth failure)
+**Given** `--fetch` is set and the same canonical path appears more than once across `bmad_repos` and the primary mount
+**When** the fetch phase runs
+**Then** the path is fetched exactly once (deduplication by resolved absolute path via `filepath.EvalSymlinks`)
+
+**Given** `--fetch` is set and a fetch does not complete within the per-repo timeout (default 60 seconds, configurable via `ASBOX_FETCH_TIMEOUT` as a Go `time.Duration` string)
+**When** the timeout fires
+**Then** the in-flight `git` process is killed via context cancellation, the repo is reported as failed with reason `timed out after <duration> (override with ASBOX_FETCH_TIMEOUT)` — the env-var hint MUST appear inline in the user-visible failure message so users hitting a timeout discover the tuning knob without reading docs — and the launch continues
+
+**Given** `--fetch` is set and one of the repositories fails to fetch (network error, auth failure, timeout)
 **When** the fetch phase runs
 **Then** the error is logged as a warning naming the failed repo and the git stderr, and the launch continues — other repos still get fetched and the sandbox still starts
 
@@ -1579,25 +1607,90 @@ So that the sandboxed agent has current remote refs on all branches — includin
 **When** the fetch phase runs
 **Then** fetches run concurrently with a bounded worker pool (default 4) and total wall time is close to the longest single fetch, not the sum
 
+**Given** concurrent fetches are running
+**When** one repo emits output
+**Then** its stderr is buffered in memory and flushed atomically in a single block when that repo's fetch completes (success or failure) — output from different repos never interleaves line-by-line
+
 **Given** `--fetch` is NOT passed
 **When** the CLI begins launch orchestration
 **Then** no fetch runs — the sandbox starts immediately, preserving offline-use behavior
 
 **Given** the `--help` output for `asbox run`
 **When** rendered
-**Then** the `--fetch` flag appears with a one-line description stating what it does and that failures are non-fatal
+**Then** the `--fetch` flag appears with a condensed two-line description — not a paragraph. Target wording: `Run 'git fetch origin' in all mounted repos before launch, using host credentials. Refs-only — never touches working tree. Non-fatal on failure.` Concurrency, timeout, skip categories, env vars, and summary shapes live in long-form docs, not `--help`. The safety guarantee (refs-only) stays inline because it is load-bearing trust information; operational details would crowd out sibling flags in a scannable flag list
 
 **Given** the fetch phase runs
-**When** completed
-**Then** a single summary line is printed to stdout: `fetched N repositories (M failed, warnings above)` — even if M is 0, the summary line prints for visibility
+**When** completed with all repos succeeding and nothing skipped
+**Then** a single short summary line is printed to stdout: `fetched N/N repositories` (e.g., `fetched 3/3 repositories`). No `(0 failed, 0 skipped)` parenthetical — the common case reads cleanly. The summary line always prints, even when N is 1, so the user always sees confirmation that fetch ran
+
+**Given** the fetch phase runs
+**When** all repos succeeded but some were skipped (Z > 0)
+**Then** the summary uses the expanded form naming each **non-zero** skip category in user-facing prose (not internal status names): `fetched X/N repositories (1 not a git repo)` or `fetched X/N repositories (1 no origin remote, 1 not a git repo)`. Zero-valued categories are suppressed. Stdout, informational
+
+**Given** the fetch phase runs
+**When** one or more repos failed (Y > 0)
+**Then** the summary line is prefixed with `WARNING:` and printed to stderr: `WARNING: fetched X/N repositories (Y failed) — see warnings above`. If non-zero skip categories are also present, they are appended inside the same parenthetical in the same user-facing prose as above (e.g. `WARNING: fetched 1/4 repositories (2 failed, 1 no origin remote) — see warnings above`). The `WARNING:` prefix makes partial-failure impossible to miss when warnings have scrolled off-screen
 
 **Implementation Notes:**
-- New package `internal/gitfetch/` with `FetchAll(ctx context.Context, paths []string) []FetchResult`. `FetchResult` contains `Path`, `Err`, `Stderr`.
-- Concurrency: bounded worker pool via `golang.org/x/sync/errgroup` with `SetLimit(4)`.
+- New package `internal/gitfetch/` with `FetchAll(ctx context.Context, paths []string, opts FetchOptions) FetchSummary`. `FetchOptions` carries `Timeout` and `Concurrency`. `FetchSummary` carries `Results []FetchResult` (with `Path`, `Status` one of `succeeded|failed|skipped-notgit|skipped-noorigin`, `Err`, `Stderr`) plus aggregate counts.
+- Deduplication uses `filepath.EvalSymlinks` before the fetch loop; paths that fail to resolve are treated as skipped-notgit.
+- Concurrency: bounded worker pool via `golang.org/x/sync/errgroup` with `SetLimit(4)`; each worker creates a per-call `context.WithTimeout` from the outer context using the configured timeout.
 - Git repo detection: a path is a git repo if `filepath.Join(path, ".git")` exists (file or directory — worktrees use a `.git` file pointing at the git dir).
-- Invoke `git fetch --all` via `os/exec` with `Dir` set to the repo path; capture combined stderr for the warning message.
+- Remote detection: before fetching, run `git -C <path> remote get-url origin`; exit status non-zero ⇒ skipped-noorigin.
+- Invoke `git fetch origin` via `os/exec` with `Dir` set to the repo path and `Context` for cancellation; capture stderr into a per-repo `bytes.Buffer` and flush once on completion to guarantee non-interleaved output.
 - Flag registration in `cmd/run.go`; resolution order: build-if-needed → mount assembly → **fetch if --fetch** → secret validation → `docker run`.
-- Tests: unit tests in `internal/gitfetch/` using `t.TempDir()` to create git repos on the fly (testable without a remote via `git init --bare` and local remote configuration). Integration test with a bmad_repos fixture verifying the sandbox sees the freshly fetched refs.
+- Tests: unit tests in `internal/gitfetch/` using `t.TempDir()` to create git repos on the fly (testable without a remote via `git init --bare` + local remote configuration). Cover: success path, no-origin skip, not-a-repo skip, timeout (`git fetch` against a sleeping listener with `ASBOX_FETCH_TIMEOUT=500ms`), timeout failure message contains the `(override with ASBOX_FETCH_TIMEOUT)` hint verbatim, dedup, pre-fetch anchor line present and names the correct repo count, short happy-path summary (`fetched N/N repositories`) with no parenthetical, expanded skip-category summary suppresses zero categories and uses user-facing prose (`1 not a git repo`, `1 no origin remote`), WARNING-prefixed summary on failure. Integration test with a bmad_repos fixture verifying the sandbox sees the freshly fetched refs under `refs/remotes/origin/`.
+
+### Story 13.3: Dirty Working Tree Warning at Launch
+
+As a developer using `bmad_repos`,
+I want `asbox run` to warn me when any mounted repository has uncommitted changes at launch time,
+So that I don't unknowingly let the agent operate on top of contaminated state left behind by a prior asbox session or manual edit.
+
+**Acceptance Criteria:**
+
+**Given** the developer runs `asbox run` (with or without `--fetch`) and at least one `bmad_repos` path (or the primary mount, if it is a git repo) has a dirty working tree
+**When** the CLI begins launch orchestration
+**Then** after mount assembly and after the fetch phase (if `--fetch` was given), but before `docker run`, the CLI inspects each git repository for dirtiness and prints a warning block to stderr naming each dirty repo and the category (`modified`, `staged`, `untracked`)
+
+**Given** a repository's working tree is clean
+**When** the dirtiness check runs against it
+**Then** no output is produced for that repo
+
+**Given** one or more repositories are dirty
+**When** the warning is emitted
+**Then** the warning is non-fatal — the sandbox still starts — and is formatted as:
+```
+WARNING: the following mounted repositories have uncommitted changes:
+  /Users/m/repos/frontend: modified (3 files), untracked (1 file)
+  /Users/m/repos/api: staged (2 files)
+The agent will see this state. If unexpected, press Ctrl+C now and investigate before the agent starts.
+(set ASBOX_SUPPRESS_DIRTY_WARNING=1 to skip this check)
+```
+The closing "Ctrl+C now" phrasing is non-negotiable: "review before proceeding" implies an agency the user does not have — by the time the warning prints, the launch is already rolling toward `docker run` and the user's only recourse is to Ctrl+C before the agent starts. The phrasing must match the actual user option. The trailing `(set ASBOX_SUPPRESS_DIRTY_WARNING=1 to skip this check)` line is also non-negotiable — an undiscoverable escape hatch is equivalent to no escape hatch, and users running `asbox run` in CI or hourly cron will otherwise grep the help text for a flag that does not exist
+
+**Given** the dirtiness check considers files
+**When** classifying them
+**Then** files matching the repository's `.gitignore` rules are excluded from the `untracked` count (so ignored build artifacts do not trigger warnings). This matches the semantics of `git status --porcelain --ignored=no`
+
+**Given** a path in `bmad_repos` is not a git repository
+**When** the dirtiness check runs
+**Then** the path is skipped silently (same rule as `--fetch`)
+
+**Given** the dirtiness check fails for a specific repo (e.g., git binary missing, repo corrupt)
+**When** the error occurs
+**Then** the launch continues; a single-line warning names the repo and the error reason. Dirtiness-check errors never abort launch
+
+**Given** the environment variable `ASBOX_SUPPRESS_DIRTY_WARNING=1` is set
+**When** `asbox run` starts
+**Then** the dirtiness check is skipped entirely. This escape hatch exists for CI or scripted contexts where dirty state is expected and the warning would only add noise. The env-var name is the same one named inline in the warning block's closing line (single source of truth — do not diverge)
+
+**Implementation Notes:**
+- New function `DetectDirty(paths []string) []DirtyResult` in `internal/gitfetch/` (co-located with fetch because both are "host-side git inspection" operations and share the git-repo detection helper). Alternatively a new `internal/gitcheck/` package if the two operations diverge in responsibilities — pick based on cohesion at implementation time.
+- Dirtiness is determined by running `git status --porcelain=v1 --ignored=no` per repo; parse the two-column prefix (`XY`) to classify: `??` ⇒ untracked; `X` non-space ⇒ staged; `Y` non-space ⇒ modified.
+- Concurrency is optional here; `git status` is fast enough that sequential execution is acceptable for typical `bmad_repos` sizes (< 10 repos).
+- Orchestration: call `DetectDirty` in `cmd/run.go` after the `--fetch` phase (fetch doesn't affect the working tree, so order is interchangeable, but running after fetch matches the "all host-side prep, then launch" shape).
+- Tests: unit tests in the owning package exercising each dirty category, the clean case, the not-a-git-repo skip, the `.gitignore` exclusion, and the suppression env var. Also assert the warning block's closing lines verbatim: the `Ctrl+C now` phrasing (not "review before proceeding") and the `(set ASBOX_SUPPRESS_DIRTY_WARNING=1 to skip this check)` self-advertisement. Integration test optional — binary invocation test is sufficient since the container never observes this output.
 
 ## Epic 14: Pre-Installed Validation & Exploration Toolchain
 
