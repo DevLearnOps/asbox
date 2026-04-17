@@ -2,7 +2,7 @@
 
 Consolidated from code reviews across all stories. Organized by category. Duplicates merged. Resolved items removed.
 
-Last updated: 2026-04-15 (full project retrospective)
+Last updated: 2026-04-17 (code review of story 11-6)
 
 ---
 
@@ -12,7 +12,6 @@ Last updated: 2026-04-15 (full project retrospective)
 - **Package name injection** — Values with shell metacharacters could inject commands via `apt-get install`. Empty strings in Packages slice produce invalid Dockerfile syntax. [internal/config/parse.go] _(stories 1-4, 1-5)_
 - **ENV key/value injection** — ENV keys not validated for shell variable format (spaces, leading digits). YAML multiline strings in env values can inject arbitrary Dockerfile directives via unescaped `ENV {{$k}}={{$v}}`. [internal/config/parse.go] _(story 1-3)_
 - **Template injection via unsanitized config inputs** — Config inputs injected directly into Dockerfile RUN/ENV directives without sanitization. [embed/Dockerfile.tmpl] _(story 1-5)_
-- **`AGENT_CMD` injection via shell expansion** — `exec gosu sandbox bash -c "${AGENT_CMD}"` passes unsanitized input through `bash -c`. Pre-existing pattern for all agents. [embed/entrypoint.sh] _(stories 4-1, 1-10)_
 - **Unsanitized explicit `project_name`** — `sanitizeProjectName()` only runs when name is derived, not when explicitly set. Affects Docker image tags, container names, and named volume names. [internal/config/parse.go] _(stories 1-7, 6-1)_
 
 ## Reliability / Correctness
@@ -62,6 +61,12 @@ Last updated: 2026-04-15 (full project retrospective)
 
 - **Apt release pinning with `/` rejected by package regex** — `packageNameRe` does not include `/`, so release-pinned apt syntax like `vim/jammy-backports` is rejected. Valid but niche; can be added if a user requests it. [internal/config/parse.go:23]
 - **Apt tilde `~` versions rejected by package regex** — Debian version strings can contain `~` for pre-release sorting (e.g., `1.0~beta1`). Uncommon in practice for direct package installs; can be added if needed. [internal/config/parse.go:23]
+
+## Deferred from: code review of story 11-6 (2026-04-17)
+
+- **Empty/whitespace-only `AGENT_CMD` bypasses `die`** — The `[[ -n "${AGENT_CMD:-}" ]]` guard accepts a value of `" "` (single space). After unquoted word-split, argv is empty and `exec gosu sandbox` fails without the helpful `die "No agent command specified"` diagnostic. Pre-existing branch condition; producer side (`agentCommand` in Go) never emits whitespace-only values. [embed/entrypoint.sh:206]
+- **`exec gosu sandbox` invocations lack `--` separator** — Neither the `$@` branch nor the `${AGENT_CMD}` branch inserts `--` between `sandbox` and the command. If a future agent command began with a dash, `gosu` could parse it as its own option. Applies to both branches; out-of-scope for story 11-6. [embed/entrypoint.sh:205,209]
+- **`TestAgentCommand_noShellMetacharacters` hardcodes the agent list** — Test iterates the literal slice `{claude, gemini, codex}` rather than a single source of truth. A future agent entry added to `agentCommand()` without a matching test update would escape the metacharacter invariant. Spec explicitly mandated the hardcoded list (Task 2.2). [cmd/run_test.go:275]
 
 ## Integration Test Quality
 

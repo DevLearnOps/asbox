@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/mcastellin/asbox/internal/config"
@@ -268,5 +269,22 @@ func TestAgentCommand_oldNameRejected(t *testing.T) {
 	_, err = agentCommand("gemini-cli")
 	if err == nil {
 		t.Fatal("expected error for old agent name, got nil")
+	}
+}
+
+func TestAgentCommand_noShellMetacharacters(t *testing.T) {
+	agents := []string{"claude", "gemini", "codex"}
+	const unsafeChars = ";&|<>$`\\\"'*?(){}[]\n\r\t"
+
+	for _, agent := range agents {
+		t.Run(agent, func(t *testing.T) {
+			cmd, err := agentCommand(agent)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if strings.ContainsAny(cmd, unsafeChars) {
+				t.Fatalf("agentCommand(%s) = %q contains shell metacharacters", agent, cmd)
+			}
+		})
 	}
 }

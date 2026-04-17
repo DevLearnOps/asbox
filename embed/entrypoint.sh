@@ -204,7 +204,9 @@ start_healthcheck_poller
 if [[ $# -gt 0 ]]; then
     exec gosu sandbox "$@"
 elif [[ -n "${AGENT_CMD:-}" ]]; then
-    exec gosu sandbox bash -c "${AGENT_CMD}"
+    # Intentional word-split: AGENT_CMD is a trusted token list from the Go CLI.
+    # shellcheck disable=SC2086
+    exec gosu sandbox ${AGENT_CMD}
 else
     die "No agent command specified"
 fi

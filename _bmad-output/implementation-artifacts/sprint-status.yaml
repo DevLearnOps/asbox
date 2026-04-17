@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: "2026-04-08"
-last_updated: "2026-04-17"  # story 11-5 code review passed
+last_updated: "2026-04-17"  # story 11-6 code review complete, status: done
 
 
 
@@ -118,5 +118,5 @@ development_status:
   11-3-env-key-value-validation: done
   11-4-non-tty-runtime-support: done
   11-5-pinned-build-dependencies: done
-  11-6-agent-command-injection-hardening: backlog
+  11-6-agent-command-injection-hardening: done
   epic-11-retrospective: optional
