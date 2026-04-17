@@ -17,6 +17,9 @@ func TestRender_baseImage(t *testing.T) {
 	if !strings.HasPrefix(output, "FROM ubuntu:24.04") {
 		t.Errorf("expected output to start with Ubuntu 24.04 base image, got: %s", firstLine(output))
 	}
+	if !strings.Contains(output, "@sha256:") {
+		t.Error("expected base image to be pinned to a sha256 digest")
+	}
 }
 
 func TestRender_tiniInstalled(t *testing.T) {
@@ -449,6 +452,9 @@ func TestRender_dockerCompose(t *testing.T) {
 	if !strings.Contains(output, "/usr/local/lib/docker/cli-plugins/docker-compose") {
 		t.Error("expected Docker Compose symlink at cli-plugins path")
 	}
+	if strings.Contains(output, "api.github.com") {
+		t.Error("expected Docker Compose install to avoid dynamic GitHub latest API lookups")
+	}
 }
 
 func TestRender_claudeCodeAgent(t *testing.T) {
@@ -474,8 +480,32 @@ func TestRender_geminiAgent(t *testing.T) {
 	if !strings.Contains(output, "npm install -g @google/gemini-cli") {
 		t.Error("expected Gemini CLI npm install in output")
 	}
+	if !strings.Contains(output, "@google/gemini-cli@") {
+		t.Error("expected Gemini CLI npm install to be version pinned")
+	}
 	if strings.Contains(output, "claude.ai/install.sh") {
 		t.Error("expected no Claude Code install when only gemini installed")
+	}
+}
+
+func TestRender_npmVersionsPinned(t *testing.T) {
+	cfg := &config.Config{
+		InstalledAgents: []string{"gemini", "codex"},
+		SDKs:            config.SDKConfig{NodeJS: "22"},
+		MCP:             []string{"playwright"},
+	}
+	output, err := Render(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, expected := range []string{
+		"@google/gemini-cli@",
+		"@openai/codex@",
+		"@playwright/mcp@",
+	} {
+		if !strings.Contains(output, expected) {
+			t.Errorf("expected version-pinned npm install containing %q", expected)
+		}
 	}
 }
 

@@ -1,5 +1,34 @@
-{{- /* Base image - tag-pinned; digest omitted for multi-arch (amd64 + arm64) support */ -}}
-FROM ubuntu:24.04
+{{- /*
+Pinned dependency maintenance guide
+
+Current pinned versions:
+- Base image: ubuntu:24.04@sha256:c4a8d5503dfb2a3eb8ab5f807da5bc69a85730fb49b5cfca2330194ebcc41c7b
+- Docker Compose: v5.0.1
+- @google/gemini-cli: 0.38.1
+- @openai/codex: 0.121.0
+- @playwright/mcp: 0.0.70
+
+Update process:
+1. Base image digest:
+   - Inspect the current multi-arch manifest index for ubuntu:24.04.
+   - Example: docker buildx imagetools inspect ubuntu:24.04
+   - Example: docker buildx imagetools inspect ubuntu:24.04 --format '{{json .Manifest}}' | jq -r .digest
+   - Verify the digest resolves for both amd64 and arm64.
+   - Example: docker buildx imagetools inspect ubuntu:24.04 --format '{{json .Manifest}}' | jq '.manifests[].platform'
+2. Docker Compose:
+   - Check https://github.com/docker/compose/releases for the next version tag.
+   - Update COMPOSE_VERSION below and keep the versioned GitHub release URL.
+3. npm packages:
+   - Check each package with npm view <package> version
+   - Update the pinned version in the relevant npm install command:
+     - npm view @google/gemini-cli version
+     - npm view @openai/codex version
+     - npm view @playwright/mcp version
+4. Verification:
+   - Run go test ./... after every version bump.
+   - Build a sandbox image on both amd64 and arm64 if the base digest changes.
+*/ -}}
+FROM ubuntu:24.04@sha256:c4a8d5503dfb2a3eb8ab5f807da5bc69a85730fb49b5cfca2330194ebcc41c7b
 
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y \
@@ -69,7 +98,7 @@ RUN mkdir -p /etc/containers && \
     printf '[storage]\ndriver = "vfs"\n' > /etc/containers/storage.conf && \
     printf '[engine]\nevents_logger = "file"\n\n[network]\nnetwork_backend = "netavark"\n' > /etc/containers/containers.conf
 
-RUN COMPOSE_VERSION=$(curl -fsSL https://api.github.com/repos/docker/compose/releases/latest | jq -r .tag_name) && \
+RUN COMPOSE_VERSION=v5.0.1 && \
     curl -fsSL "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-linux-$(uname -m)" -o /usr/local/bin/docker-compose && \
     chmod +x /usr/local/bin/docker-compose && \
     mkdir -p /usr/local/lib/docker/cli-plugins && \
@@ -85,12 +114,12 @@ USER root
 {{- end}}
 {{- if eq . "gemini"}}
 
-RUN npm install -g @google/gemini-cli && \
+RUN npm install -g @google/gemini-cli@0.38.1 && \
     chown -R sandbox:sandbox /home/sandbox/.npm-global
 {{- end}}
 {{- if eq . "codex"}}
 
-RUN npm install -g @openai/codex && \
+RUN npm install -g @openai/codex@0.121.0 && \
     chown -R sandbox:sandbox /home/sandbox/.npm-global
 {{- end}}
 {{- end}}
@@ -115,7 +144,7 @@ RUN rm -f /tmp/agent-instructions.md
 
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers
 ENV PLAYWRIGHT_MCP_BROWSER=chromium
-RUN npm install -g @playwright/mcp && \
+RUN npm install -g @playwright/mcp@0.0.70 && \
     npx playwright install --with-deps chromium webkit && \
     mkdir -p /opt/playwright-browsers && \
     chown -R sandbox:sandbox /opt/playwright-browsers
