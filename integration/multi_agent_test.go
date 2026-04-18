@@ -101,6 +101,24 @@ func TestMultiAgent_agentFlagValidation(t *testing.T) {
 		}
 	})
 
+	t.Run("uninstalled_agent_short_flag_exits_code_1", func(t *testing.T) {
+		t.Parallel()
+		cmd := exec.Command(binaryPath, "run", "-a", "gemini", "-f", configPath)
+		output, err := cmd.CombinedOutput()
+		outStr := string(output)
+
+		if err == nil {
+			t.Fatal("expected non-zero exit, got nil error")
+		}
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
+			t.Errorf("expected exit code 1, got %v", err)
+		}
+		if !strings.Contains(outStr, "not installed") {
+			t.Errorf("expected 'not installed' in output:\n%s", outStr)
+		}
+	})
+
 	t.Run("invalid_agent_name_exits_code_1", func(t *testing.T) {
 		t.Parallel()
 		cmd := exec.Command(binaryPath, "run", "--agent", "invalidname", "-f", configPath)

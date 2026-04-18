@@ -28,6 +28,38 @@ func writeRunConfig(t *testing.T, dir, content string) string {
 	return path
 }
 
+func resetRunCommandState(t *testing.T) {
+	t.Helper()
+
+	if err := runCmd.Flags().Set("agent", ""); err != nil {
+		t.Fatalf("reset agent flag: %v", err)
+	}
+	if flag := runCmd.Flags().Lookup("agent"); flag != nil {
+		flag.Changed = false
+	}
+
+	if err := runCmd.Flags().Set("no-cache", "false"); err != nil {
+		t.Fatalf("reset no-cache flag: %v", err)
+	}
+	if flag := runCmd.Flags().Lookup("no-cache"); flag != nil {
+		flag.Changed = false
+	}
+
+	if err := runCmd.Flags().Set("help", "false"); err != nil {
+		t.Fatalf("reset run help flag: %v", err)
+	}
+	if flag := runCmd.Flags().Lookup("help"); flag != nil {
+		flag.Changed = false
+	}
+
+	if err := rootCmd.Flags().Set("help", "false"); err != nil {
+		t.Fatalf("reset root help flag: %v", err)
+	}
+	if flag := rootCmd.Flags().Lookup("help"); flag != nil {
+		flag.Changed = false
+	}
+}
+
 func TestRun_nonexistentMountSource_returnsConfigError(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := writeRunConfig(t, dir, `
@@ -53,6 +85,311 @@ mounts:
 	}
 	if got := exitCode(err); got != 1 {
 		t.Errorf("exitCode = %d, want 1", got)
+	}
+}
+
+func TestResolveAgentOverride_tableDriven(t *testing.T) {
+	tests := []struct {
+		name        string
+		args        []string
+		flagChanged bool
+		flagVal     string
+		want        string
+		wantErr     string
+	}{
+		{
+			name: "no_override",
+		},
+		{
+			name: "positional_override",
+			args: []string{"gemini"},
+			want: "gemini",
+		},
+		{
+			name:        "flag_override",
+			flagChanged: true,
+			flagVal:     "codex",
+			want:        "codex",
+		},
+		{
+			name:        "both_forms_usage_error",
+			args:        []string{"codex"},
+			flagChanged: true,
+			flagVal:     "claude",
+			wantErr:     "agent specified both as positional argument ('codex') and via --agent ('claude') — use only one form",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := resolveAgentOverride(tt.args, tt.flagChanged, tt.flagVal)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if got != tt.want {
+					t.Fatalf("resolveAgentOverride() = %q, want %q", got, tt.want)
+				}
+				return
+			}
+
+			if got != "" {
+				t.Fatalf("resolveAgentOverride() override = %q, want empty on error", got)
+			}
+			var ue *usageError
+			if !errors.As(err, &ue) {
+				t.Fatalf("expected *usageError, got %T: %v", err, err)
+			}
+			if err.Error() != tt.wantErr {
+				t.Fatalf("error = %q, want %q", err.Error(), tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestRun_agentShorthand_equivalentToFlag(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := writeRunConfig(t, dir, `
+installed_agents: [claude]
+sdks:
+  nodejs: "22"
+`)
+
+	old := configFile
+	configFile = cfgPath
+	t.Cleanup(func() { configFile = old })
+
+	runWithArgs := func(args ...string) error {
+		t.Helper()
+		resetRunCommandState(t)
+		r := newRootCmd()
+		return r.run(args...)
+	}
+
+	shortErr := runWithArgs("run", "-a", "gemini")
+	longErr := runWithArgs("run", "--agent", "gemini")
+
+	for name, err := range map[string]error{
+		"short": shortErr,
+		"long":  longErr,
+	} {
+		if err == nil {
+			t.Fatalf("%s form: expected error, got nil", name)
+		}
+		var ce *config.ConfigError
+		if !errors.As(err, &ce) {
+			t.Fatalf("%s form: expected *config.ConfigError, got %T: %v", name, err, err)
+		}
+		if got := exitCode(err); got != 1 {
+			t.Fatalf("%s form: exitCode = %d, want 1", name, got)
+		}
+		if !strings.Contains(err.Error(), "not installed") {
+			t.Fatalf("%s form: expected 'not installed' error (proving override took effect), got %q", name, err.Error())
+		}
+		if !strings.Contains(err.Error(), "gemini") {
+			t.Fatalf("%s form: expected 'gemini' in error (proving override took effect), got %q", name, err.Error())
+		}
+	}
+
+	if shortErr.Error() != longErr.Error() {
+		t.Fatalf("short and long flag errors differ:\nshort: %q\nlong:  %q", shortErr.Error(), longErr.Error())
+	}
+}
+
+func TestRun_agentPositional_equivalentToFlag(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := writeRunConfig(t, dir, `
+installed_agents: [claude, gemini, codex]
+sdks:
+  nodejs: "22"
+mounts:
+  - source: ./missing-workspace
+    target: /workspace
+`)
+
+	old := configFile
+	configFile = cfgPath
+	t.Cleanup(func() { configFile = old })
+
+	runWithArgs := func(args ...string) error {
+		t.Helper()
+		resetRunCommandState(t)
+		r := newRootCmd()
+		return r.run(args...)
+	}
+
+	positionalErr := runWithArgs("run", "gemini")
+	flagErr := runWithArgs("run", "--agent", "gemini")
+
+	for name, err := range map[string]error{
+		"positional": positionalErr,
+		"flag":       flagErr,
+	} {
+		if err == nil {
+			t.Fatalf("%s form: expected error, got nil", name)
+		}
+		var ue *usageError
+		if errors.As(err, &ue) {
+			t.Fatalf("%s form: unexpected usageError: %v", name, err)
+		}
+		var ce *config.ConfigError
+		if !errors.As(err, &ce) {
+			t.Fatalf("%s form: expected *config.ConfigError, got %T: %v", name, err, err)
+		}
+		if got := exitCode(err); got != 1 {
+			t.Fatalf("%s form: exitCode = %d, want 1", name, got)
+		}
+		if !strings.Contains(err.Error(), "mount source") {
+			t.Fatalf("%s form: expected mount validation error, got %q", name, err.Error())
+		}
+	}
+
+	if positionalErr.Error() != flagErr.Error() {
+		t.Fatalf("positional and flag errors differ:\npositional: %q\nflag:       %q", positionalErr.Error(), flagErr.Error())
+	}
+}
+
+func TestRun_agentBothPositionalAndFlag_usageError(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := writeRunConfig(t, dir, `
+installed_agents: [claude, gemini, codex]
+sdks:
+  nodejs: "22"
+`)
+
+	old := configFile
+	configFile = cfgPath
+	t.Cleanup(func() { configFile = old })
+
+	const want = "agent specified both as positional argument ('codex') and via --agent ('claude') — use only one form"
+
+	tests := [][]string{
+		{"run", "codex", "--agent", "claude"},
+		{"run", "-a", "claude", "codex"},
+	}
+
+	for _, args := range tests {
+		t.Run(strings.Join(args[1:], "_"), func(t *testing.T) {
+			resetRunCommandState(t)
+			r := newRootCmd()
+			err := r.run(args...)
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			var ue *usageError
+			if !errors.As(err, &ue) {
+				t.Fatalf("expected *usageError, got %T: %v", err, err)
+			}
+			if got := exitCode(err); got != 2 {
+				t.Fatalf("exitCode = %d, want 2", got)
+			}
+			if err.Error() != want {
+				t.Fatalf("error = %q, want %q", err.Error(), want)
+			}
+		})
+	}
+}
+
+func TestRun_agentPositionalNotInstalled_configError(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := writeRunConfig(t, dir, `
+installed_agents: [claude]
+`)
+
+	old := configFile
+	configFile = cfgPath
+	t.Cleanup(func() { configFile = old })
+
+	resetRunCommandState(t)
+	r := newRootCmd()
+	err := r.run("run", "gemini")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	var ce *config.ConfigError
+	if !errors.As(err, &ce) {
+		t.Fatalf("expected *config.ConfigError, got %T: %v", err, err)
+	}
+	if got := exitCode(err); got != 1 {
+		t.Fatalf("exitCode = %d, want 1", got)
+	}
+	if !strings.Contains(err.Error(), "not installed") {
+		t.Fatalf("expected not installed error, got %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "gemini") {
+		t.Fatalf("expected agent name in error, got %q", err.Error())
+	}
+}
+
+func TestRun_agentDefault_usesConfigDefaultAgent(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := writeRunConfig(t, dir, `
+default_agent: gemini
+installed_agents: [claude, gemini]
+sdks:
+  nodejs: "22"
+mounts:
+  - source: ./missing-workspace
+    target: /workspace
+`)
+
+	old := configFile
+	configFile = cfgPath
+	t.Cleanup(func() { configFile = old })
+
+	resetRunCommandState(t)
+	r := newRootCmd()
+	err := r.run("run")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	var ue *usageError
+	if errors.As(err, &ue) {
+		t.Fatalf("unexpected usageError — no override should trigger on plain run: %v", err)
+	}
+	if !strings.Contains(err.Error(), "mount source") {
+		t.Fatalf("expected to reach mount validation (proving cfg.DefaultAgent was honored), got %q", err.Error())
+	}
+}
+
+func TestRun_helpContainsPositionalAndShortFlag(t *testing.T) {
+	resetRunCommandState(t)
+	r := newRootCmd()
+	err := r.run("run", "--help")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	output := r.output()
+	for _, want := range []string{
+		"run [agent]",
+		"-a, --agent",
+		"[agent] optionally overrides the configured default agent for this session.",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("help output missing %q\noutput:\n%s", want, output)
+		}
+	}
+}
+
+func TestRun_tooManyArgs_usageError(t *testing.T) {
+	resetRunCommandState(t)
+	r := newRootCmd()
+	err := r.run("run", "claude", "codex")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	var ue *usageError
+	if !errors.As(err, &ue) {
+		t.Fatalf("expected *usageError, got %T: %v", err, err)
+	}
+	if got := exitCode(err); got != 2 {
+		t.Fatalf("exitCode = %d, want 2", got)
+	}
+	if !strings.Contains(err.Error(), "at most 1") {
+		t.Fatalf("expected 'at most 1' in error, got %q", err.Error())
 	}
 }
 

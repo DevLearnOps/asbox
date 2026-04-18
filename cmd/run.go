@@ -16,16 +16,26 @@ import (
 )
 
 var runCmd = &cobra.Command{
-	Use:   "run",
+	Use:   "run [agent]",
 	Short: "Run the sandbox container",
+	Long:  "Run the sandbox container.\n\n[agent] optionally overrides the configured default agent for this session.",
+	Args: func(cmd *cobra.Command, args []string) error {
+		if err := cobra.MaximumNArgs(1)(cmd, args); err != nil {
+			return &usageError{err: err}
+		}
+		return nil
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := config.Parse(configFile)
 		if err != nil {
 			return err
 		}
 
-		// Agent override via --agent flag
-		agentOverride, _ := cmd.Flags().GetString("agent")
+		flagVal, _ := cmd.Flags().GetString("agent")
+		agentOverride, err := resolveAgentOverride(args, cmd.Flags().Changed("agent"), flagVal)
+		if err != nil {
+			return err
+		}
 		if agentOverride != "" {
 			if err := config.ValidateAgent(agentOverride); err != nil {
 				return err
@@ -144,6 +154,24 @@ var runCmd = &cobra.Command{
 	},
 }
 
+func resolveAgentOverride(args []string, flagChanged bool, flagVal string) (string, error) {
+	var positional string
+	if len(args) == 1 {
+		positional = args[0]
+	}
+
+	switch {
+	case positional != "" && flagChanged:
+		return "", &usageError{err: fmt.Errorf("agent specified both as positional argument ('%s') and via --agent ('%s') — use only one form", positional, flagVal)}
+	case positional != "":
+		return positional, nil
+	case flagChanged:
+		return flagVal, nil
+	default:
+		return "", nil
+	}
+}
+
 // buildEnvVars assembles container environment variables with priority:
 // 1. cfg.Env (lowest) 2. secrets from host env 3. HOST_UID/HOST_GID (highest).
 // Returns an error if a declared secret is not set in the host environment.
@@ -209,6 +237,6 @@ func agentInstructionTarget(agent string) (string, error) {
 
 func init() {
 	runCmd.Flags().Bool("no-cache", false, "Force a complete rebuild, bypassing content-hash check and Docker layer cache")
-	runCmd.Flags().String("agent", "", "Override default agent for this session (e.g., claude, gemini, codex)")
+	runCmd.Flags().StringP("agent", "a", "", "Override default agent for this session (e.g., claude, gemini, codex). Also accepted as a positional argument.")
 	rootCmd.AddCommand(runCmd)
 }

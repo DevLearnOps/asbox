@@ -93,3 +93,10 @@ Last updated: 2026-04-17 (code review of story 11-6)
 
 - No checksum verification on Docker Compose binary download — `embed/Dockerfile.tmpl` fetches Docker Compose via curl without SHA256 integrity check. Pre-existing pattern, not introduced by version pinning.
 - Build-time `npx playwright install` browser versions determined by transitive deps — browser builds fetched at build time are controlled by `@playwright/mcp`'s dependency tree, not explicitly pinned. Pre-existing pattern.
+
+## Deferred from: code review of 12-1-short-flag-and-positional-agent-argument (2026-04-18)
+
+- `resetRunCommandState` does not reset the persistent root `-f`/`file` flag — no test currently uses `-f` in-process, but a future test using it will leak config-file state across subtests. [cmd/run_test.go:31]
+- `resetRunCommandState` mutates pflag's `flag.Changed` struct field directly — works but reaches into library internals. Latent breakage if pflag's internal layout changes. [cmd/run_test.go:31-61]
+- Package-level `rootCmd`/`runCmd` shared across tests — any future `t.Parallel()` on unit tests would race on `SetArgs` and flag state. Pre-existing architectural constraint. [cmd/root.go]
+- Control-character echoing in `ValidateAgent` unsupported-agent error — raw positional interpolated into the `ConfigError` message; inputs with `\n`/`\r` produce multi-line terminal output. Error-path only. [internal/config/parse.go:229]

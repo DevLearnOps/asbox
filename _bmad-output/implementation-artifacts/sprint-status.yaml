@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: "2026-04-08"
-last_updated: "2026-04-17"  # PRD edit: folded future-work.md into Epics 12-15 backlog
+last_updated: "2026-04-18"  # Story 12.1 code review complete; status -> done
 
 
 
@@ -122,8 +122,8 @@ development_status:
   epic-11-retrospective: optional
 
   # Epic 12: CLI Ergonomics for Agent Override (from future-work.md 2026-04-17)
-  epic-12: backlog
-  12-1-short-flag-and-positional-agent-argument: backlog
+  epic-12: in-progress  # first story contexted 2026-04-18
+  12-1-short-flag-and-positional-agent-argument: done
   epic-12-retrospective: optional
 
   # Epic 13: Multi-Repo State Management (from future-work.md 2026-04-17)
