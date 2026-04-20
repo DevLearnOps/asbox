@@ -34,7 +34,11 @@ You are running inside an isolated development sandbox container.
 
 ### Code Exploration
 
-Additional code-exploration tooling is pending and will be documented here when available.
+- `rg` (ripgrep) — Fast content search; respects `.gitignore` by default.
+- `fd` — Fast file-name search; respects `.gitignore` by default.
+- `ast-grep` — Structural code search via AST; use `ast-grep run -p '<pattern>' --lang <lang>`.
+- `ctags` (universal-ctags) — Symbol indexer; generate tags with `ctags -R .`.
+- `git ls-files` — Enumerate tracked files; prefer over `find` for clean repo traversal.
 
 ## Working Directory
 

@@ -530,7 +530,64 @@ func TestRender_validationToolsPinnedVersions(t *testing.T) {
 	}
 }
 
-func TestRender_validationToolsNoDynamicLatest(t *testing.T) {
+func TestRender_explorationToolsBlockPresent(t *testing.T) {
+	cfg := &config.Config{InstalledAgents: []string{"claude"}}
+	output, err := Render(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(output, "# exploration_tools") {
+		t.Error("expected rendered Dockerfile to include exploration_tools block")
+	}
+	if !strings.Contains(output, "/usr/local/bin/ast-grep") {
+		t.Error("expected rendered Dockerfile to install ast-grep into /usr/local/bin")
+	}
+}
+
+func TestRender_explorationToolsAllFourPresent(t *testing.T) {
+	cfg := &config.Config{InstalledAgents: []string{"claude"}}
+	output, err := Render(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, expected := range []string{
+		"ripgrep=14.1.0-1",
+		"fd-find=9.0.0-1",
+		"universal-ctags=5.9.20210829.0-1",
+		"/usr/local/bin/ast-grep",
+		"ln -sf /usr/bin/fdfind /usr/local/bin/fd",
+	} {
+		if !strings.Contains(output, expected) {
+			t.Errorf("expected rendered Dockerfile to contain %q", expected)
+		}
+	}
+}
+
+func TestRender_explorationToolsPinnedVersions(t *testing.T) {
+	cfg := &config.Config{InstalledAgents: []string{"claude"}}
+	output, err := Render(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	tests := []struct {
+		tool    string
+		version string
+	}{
+		{tool: "ripgrep", version: "14.1.0-1"},
+		{tool: "fd-find", version: "9.0.0-1"},
+		{tool: "universal-ctags", version: "5.9.20210829.0-1"},
+		{tool: "ast-grep", version: "0.42.1"},
+	}
+
+	for _, tt := range tests {
+		if !strings.Contains(output, tt.version) {
+			t.Errorf("expected %s version %q in rendered Dockerfile", tt.tool, tt.version)
+		}
+	}
+}
+
+func TestRender_toolchainNoDynamicLatest(t *testing.T) {
 	// Rendered against an empty config so SDK/agent blocks that legitimately use
 	// `curl | bash` (nodesource, get-pip) or `api.github.com` are not emitted.
 	// Note: the Dockerfile header documents these forbidden strings in a
@@ -542,13 +599,13 @@ func TestRender_validationToolsNoDynamicLatest(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if strings.Contains(output, "api.github.com") {
-		t.Error("expected validation tools block to avoid api.github.com lookups")
+		t.Error("expected toolchain blocks to avoid api.github.com lookups")
 	}
 	if strings.Contains(output, "releases/latest") {
-		t.Error("expected validation tools block to avoid releases/latest lookups")
+		t.Error("expected toolchain blocks to avoid releases/latest lookups")
 	}
 	if strings.Contains(output, "| bash") {
-		t.Error("expected validation tools block to avoid curl | bash installers")
+		t.Error("expected toolchain blocks to avoid curl | bash installers")
 	}
 }
 
@@ -571,6 +628,38 @@ func TestRender_validationToolsUnconditional(t *testing.T) {
 		if !strings.Contains(output, "# validation_tools") {
 			t.Errorf("config %d: expected validation_tools block in rendered Dockerfile", i)
 		}
+	}
+}
+
+func TestRender_explorationToolsUnconditional(t *testing.T) {
+	configs := []*config.Config{
+		{},
+		{InstalledAgents: []string{"claude"}},
+		{
+			InstalledAgents: []string{"claude", "gemini", "codex"},
+			SDKs:            config.SDKConfig{NodeJS: "22", Python: "3.12", Go: "1.23"},
+			MCP:             []string{"playwright"},
+		},
+	}
+
+	for i, cfg := range configs {
+		output, err := Render(cfg)
+		if err != nil {
+			t.Fatalf("config %d: unexpected error: %v", i, err)
+		}
+		if !strings.Contains(output, "# exploration_tools") {
+			t.Errorf("config %d: expected exploration_tools block in rendered Dockerfile", i)
+		}
+	}
+}
+
+func TestRender_fdSymlinkCreated(t *testing.T) {
+	output, err := Render(&config.Config{InstalledAgents: []string{"claude"}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(output, "ln -sf /usr/bin/fdfind /usr/local/bin/fd") {
+		t.Error("expected rendered Dockerfile to create fd symlink")
 	}
 }
 

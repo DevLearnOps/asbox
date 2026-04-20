@@ -53,6 +53,44 @@ func TestToolchain_devopsValidation(t *testing.T) {
 	}
 }
 
+func TestToolchain_codeExploration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+	t.Cleanup(cancel)
+
+	image := buildTestImage(t)
+	container := startTestContainer(ctx, t, image)
+
+	tests := []struct {
+		name            string
+		command         []string
+		expectSubstring string
+	}{
+		{name: "ripgrep", command: []string{"rg", "--version"}, expectSubstring: "ripgrep 14.1.0"},
+		{name: "fd", command: []string{"fd", "--version"}, expectSubstring: "fdfind 9.0.0"},
+		{name: "ast-grep", command: []string{"ast-grep", "--version"}, expectSubstring: "ast-grep 0.42.1"},
+		{name: "ctags", command: []string{"ctags", "--version"}, expectSubstring: "Universal Ctags"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			stdout, exitCode := execAsUser(ctx, t, container, "sandbox", tt.command)
+			if exitCode != 0 {
+				t.Fatalf("%s exited with %d:\n%s", tt.name, exitCode, truncateOutput(stdout, 500))
+			}
+			if !strings.Contains(stdout, tt.expectSubstring) {
+				t.Errorf("%s output missing %q:\n%s", tt.name, tt.expectSubstring, truncateOutput(stdout, 500))
+			}
+		})
+	}
+}
+
 func TestToolchain_cacheDirsOwnedBySandbox(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
@@ -90,6 +128,68 @@ func TestToolchain_cacheDirsOwnedBySandbox(t *testing.T) {
 		if exitCode != 0 {
 			t.Fatalf("%v exited with %d:\n%s", cmd, exitCode, truncateOutput(stdout, 500))
 		}
+	}
+}
+
+func TestToolchain_rgRespectsGitignore(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+	t.Cleanup(cancel)
+
+	image := buildTestImage(t)
+	container := startTestContainer(ctx, t, image)
+
+	stdout, exitCode := execAsUser(ctx, t, container, "sandbox", []string{"bash", "-lc", `
+set -eu
+tmp="$(mktemp -d)"
+mkdir -p "$tmp/src"
+printf 'needle\n' > "$tmp/src/hit.txt"
+printf 'needle\n' > "$tmp/ignored.log"
+printf '*.log\n' > "$tmp/.gitignore"
+(cd "$tmp" && git init -q && rg -n --no-heading needle)
+`})
+	if exitCode != 0 {
+		t.Fatalf("rg exited with %d:\n%s", exitCode, truncateOutput(stdout, 500))
+	}
+	if !strings.Contains(stdout, "src/hit.txt") {
+		t.Errorf("expected rg output to include tracked match:\n%s", truncateOutput(stdout, 500))
+	}
+	if strings.Contains(stdout, "ignored.log") {
+		t.Errorf("expected rg output to respect .gitignore:\n%s", truncateOutput(stdout, 500))
+	}
+}
+
+func TestToolchain_fdRespectsGitignore(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+	t.Cleanup(cancel)
+
+	image := buildTestImage(t)
+	container := startTestContainer(ctx, t, image)
+
+	stdout, exitCode := execAsUser(ctx, t, container, "sandbox", []string{"bash", "-lc", `
+set -eu
+tmp="$(mktemp -d)"
+mkdir -p "$tmp/src"
+: > "$tmp/src/keep.go"
+: > "$tmp/ignored.go"
+printf 'ignored.go\n' > "$tmp/.gitignore"
+(cd "$tmp" && git init -q && fd -e go)
+`})
+	if exitCode != 0 {
+		t.Fatalf("fd exited with %d:\n%s", exitCode, truncateOutput(stdout, 500))
+	}
+	if !strings.Contains(stdout, "src/keep.go") {
+		t.Errorf("expected fd output to include Go file:\n%s", truncateOutput(stdout, 500))
+	}
+	if strings.Contains(stdout, "ignored.go") {
+		t.Errorf("expected fd output to respect .gitignore:\n%s", truncateOutput(stdout, 500))
 	}
 }
 
@@ -170,6 +270,37 @@ kustomize build "$kustomize_dir"
 			t.Errorf("expected rendered kustomize output, got:\n%s", truncateOutput(stdout, 500))
 		}
 	})
+}
+
+func TestToolchain_astGrepStructuralMatch(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+	t.Cleanup(cancel)
+
+	image := buildTestImage(t)
+	container := startTestContainer(ctx, t, image)
+
+	stdout, exitCode := execAsUser(ctx, t, container, "sandbox", []string{"bash", "-lc", `
+set -eu
+tmp="$(mktemp -d)"
+cat > "$tmp/demo.js" <<'EOF'
+console.log("hello");
+console.warn("hi");
+EOF
+ast-grep run -p 'console.log($X)' --lang js "$tmp"
+`})
+	if exitCode != 0 {
+		t.Fatalf("ast-grep exited with %d:\n%s", exitCode, truncateOutput(stdout, 500))
+	}
+	if !strings.Contains(stdout, "demo.js") {
+		t.Errorf("expected ast-grep output to include file path:\n%s", truncateOutput(stdout, 500))
+	}
+	if strings.Contains(stdout, "console.warn") {
+		t.Errorf("expected ast-grep output to exclude non-matching structural nodes:\n%s", truncateOutput(stdout, 500))
+	}
 }
 
 func truncateOutput(output string, max int) string {

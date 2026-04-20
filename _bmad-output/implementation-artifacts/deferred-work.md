@@ -2,7 +2,7 @@
 
 Consolidated from code reviews across all stories. Organized by category. Duplicates merged. Resolved items removed.
 
-Last updated: 2026-04-17 (code review of story 11-6)
+Last updated: 2026-04-20 (code review of story 14-2)
 
 ---
 
@@ -120,3 +120,10 @@ Last updated: 2026-04-17 (code review of story 11-6)
 - `TestRender_validationToolsPinnedVersions` uses bare `strings.Contains(output, "v1.35.4")` which would match a future `v1.35.40` or any superstring. Pre-existing pattern from `TestRender_npmVersionsPinned` (story 11.5). Low-probability collision; word-boundary regex would be more precise. [internal/template/render_test.go:499-528]
 - Multiple `tar -xzf ... -C /tmp <member>` lines in the `validation_tools` block extract a single named member — if upstream ever renames the binary member inside an archive, extraction silently produces nothing. Today protected by `set -eux` (the next `install -m 0755` fails loud) and by the integration-test version assertions. Consider using `-C /tmp --strip-components=N` with the discovered layout when bumping. [embed/Dockerfile.tmpl:135,139,146,154,158,162,166]
 - Parallel subtests in `TestToolchain_devopsValidation` share a single container; concurrent `helm`/`kubectl`/`trivy` invocations could race on first-run cache initialization inside the pre-created `.cache/<tool>` dirs. Low-probability for read-only version commands. Not observed to flake. [integration/toolchain_test.go:44-60]
+
+## Deferred from: code review of 14-2-pre-installed-code-exploration-tools (2026-04-20)
+
+- `TestToolchain_astGrepStructuralMatch` negative assertion checks `!strings.Contains(stdout, "console.warn")`. Works today because ast-grep 0.42.1 prints only matched lines. If a future bump adds default line-context, `console.warn` (one line below the match) would bleed into output and falsely fail the test. Move the negative line further away or into a separate fixture file when bumping. [integration/toolchain_test.go:301-303]
+- `ast-grep` zip extraction assumes a flat layout at `/tmp/ast-grep/ast-grep`. Upstream could reshape the archive on a future version bump (e.g., nest under `ast-grep-<version>/`). No `find` probe; failure is loud at build time but only when building. A local layout-verification line would harden for bumps. [embed/Dockerfile.tmpl:222-223]
+- `TestRender_toolchainNoDynamicLatest` negative assertions (`!api.github.com`, `!releases/latest`, `!| bash`) only pass because the exploration-tools maintenance procedure sits inside the `{{- /* ... */ -}}` header wrapper, which Go-template stripping removes before assertions run. Splitting or relocating the header outside the wrapper flips the test red with no functional regression. Consider per-line guards that only scan rendered (post-strip) content explicitly. [internal/template/render_test.go:590-610]
+- Integration-test helper replaces the sandbox entrypoint with `tail -f /dev/null`, so `persist_env`/`/etc/profile.d/sandbox-env.sh` never runs and `GIT_AUTHOR_*` is never set. Today only `git init -q` is used, which works without identity; any future test that calls `git commit` (e.g., to exercise rg/fd against tracked files) will fail with "Author identity unknown". Systemic — affects all integration tests, not just 14.2. [integration/toolchain_test.go, `startTestContainer` helper]

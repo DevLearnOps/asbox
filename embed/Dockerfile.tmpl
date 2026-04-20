@@ -22,6 +22,12 @@ Pinned validation tools:
 - flux: v2.8.5
 - sops: v3.12.2
 
+Pinned exploration tools:
+- ripgrep: 14.1.0-1
+- fd-find: 9.0.0-1 (binary is `fdfind`; symlinked to `fd`)
+- universal-ctags: 5.9.20210829.0-1
+- ast-grep: 0.42.1
+
 Update process:
 1. Base image digest:
    - Inspect the current multi-arch manifest index for ubuntu:24.04.
@@ -94,6 +100,27 @@ Validation tools update procedure:
 13. Validation verification:
    - Update this comment block and the versioned URLs in the validation_tools RUN block in the same commit.
    - Inspect release assets before bumping any multi-arch binary; use gh release view <tag> --repo <org>/<repo> when the filename pattern is unclear.
+   - Run go test ./... && go test -v ./integration -count=1 -timeout 20m after every bump.
+
+Exploration tools update procedure:
+1. ripgrep:
+   - Releases: https://github.com/BurntSushi/ripgrep/releases
+   - Check newer package version: docker run --rm ubuntu:24.04 bash -lc 'apt-get update >/dev/null && apt-cache policy ripgrep'
+   - Asset naming: apt-managed; use the exact Debian version from apt-cache (for example `14.1.0-1`)
+2. fd-find:
+   - Releases: https://github.com/sharkdp/fd/releases
+   - Check newer package version: docker run --rm ubuntu:24.04 bash -lc 'apt-get update >/dev/null && apt-cache policy fd-find'
+   - Asset naming: apt-managed; package is `fd-find`, binary is `/usr/bin/fdfind`, and the image provides `/usr/local/bin/fd`
+3. universal-ctags:
+   - Releases: https://github.com/universal-ctags/ctags/releases
+   - Check newer package version: docker run --rm ubuntu:24.04 bash -lc 'apt-get update >/dev/null && apt-cache policy universal-ctags'
+   - Asset naming: apt-managed; use the exact Debian version from apt-cache, including the revision suffix
+4. ast-grep:
+   - Releases: https://github.com/ast-grep/ast-grep/releases
+   - Check newer tag: curl -s https://api.github.com/repos/ast-grep/ast-grep/releases/latest | jq -r .tag_name
+   - Asset naming: use app-x86_64-unknown-linux-gnu.zip / app-aarch64-unknown-linux-gnu.zip; map dpkg arch to uname -m-style token
+5. Exploration verification:
+   - Update this comment block and the versioned URLs in the exploration_tools RUN block in the same commit.
    - Run go test ./... && go test -v ./integration -count=1 -timeout 20m after every bump.
 */ -}}
 FROM ubuntu:24.04@sha256:c4a8d5503dfb2a3eb8ab5f807da5bc69a85730fb49b5cfca2330194ebcc41c7b
@@ -170,6 +197,30 @@ RUN set -eux; \
     install -m 0755 /tmp/sops /usr/local/bin/sops && \
     mkdir -p /home/sandbox/.cache/trivy /home/sandbox/.cache/helm /home/sandbox/.kube /home/sandbox/.terraform.d /home/sandbox/.config/sops && \
     chown -R sandbox:sandbox /home/sandbox/.cache /home/sandbox/.kube /home/sandbox/.terraform.d /home/sandbox/.config && \
+    rm -rf /tmp/*
+
+# exploration_tools — pinned code exploration toolchain (FR63, NFR16). See header for version bump procedure.
+RUN set -eux; \
+    cd /tmp; \
+    dpkgArch="$(dpkg --print-architecture)"; \
+    case "${dpkgArch}" in \
+        amd64) astGrepArch="x86_64" ;; \
+        arm64) astGrepArch="aarch64" ;; \
+        *) echo "unsupported architecture: ${dpkgArch}" >&2; exit 1 ;; \
+    esac; \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ripgrep=14.1.0-1 \
+        fd-find=9.0.0-1 \
+        universal-ctags=5.9.20210829.0-1 && \
+    rm -rf /var/lib/apt/lists/* && \
+    # fd-find installs as /usr/bin/fdfind on Debian/Ubuntu to avoid collision with an older tool.
+    # Symlink to /usr/local/bin/fd so the upstream-documented command name works (AC#10).
+    ln -sf /usr/bin/fdfind /usr/local/bin/fd && \
+    # ast-grep: arch uses uname -m-style tokens => x86_64|aarch64 (mapped from dpkg arch above)
+    curl -fsSL "https://github.com/ast-grep/ast-grep/releases/download/0.42.1/app-${astGrepArch}-unknown-linux-gnu.zip" -o /tmp/ast-grep.zip && \
+    unzip -q /tmp/ast-grep.zip -d /tmp/ast-grep && \
+    install -m 0755 /tmp/ast-grep/ast-grep /usr/local/bin/ast-grep && \
     rm -rf /tmp/*
 {{- if .SDKs.NodeJS}}
 

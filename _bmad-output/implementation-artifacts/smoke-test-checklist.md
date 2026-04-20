@@ -82,6 +82,13 @@ Run after each story completion or significant change. Requires a valid API key 
 - [ ] `helm template` on a real chart renders successfully inside the sandbox
 - [ ] `sops` encrypts and decrypts a test YAML with a local age key
 
+## 12. Story 14.2 — Code Exploration Toolchain
+
+- [ ] `rg <pattern>` in a real mounted project respects `.gitignore` (spot-check against `node_modules/`)
+- [ ] `fd <glob>` in a real mounted project respects `.gitignore`
+- [ ] `ast-grep run -p '<pattern>' --lang <lang>` in a real mounted project returns expected AST matches (pick a real pattern like `console.log($X)` or `fmt.Println($X)` from the agent-facing repo)
+- [ ] `ctags -R .` generates a `tags` file without error in a real mounted project
+
 ---
 
 ## Post-Test Cleanup

@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: "2026-04-08"
-last_updated: "2026-04-20"  # Story 14.1 code review complete; status -> done
+last_updated: "2026-04-20"  # Story 14.2 code review complete; status -> done
 
 
 
@@ -135,7 +135,7 @@ development_status:
   # Epic 14: Pre-Installed Validation & Exploration Toolchain (from future-work.md 2026-04-17)
   epic-14: in-progress  # first story contexted 2026-04-20 (14.1)
   14-1-pre-installed-devops-validation-toolchain: done
-  14-2-pre-installed-code-exploration-tools: backlog
+  14-2-pre-installed-code-exploration-tools: done  # code review complete 2026-04-20
   epic-14-retrospective: optional
 
   # Epic 15 (Research/POC): Local Kubernetes Cluster Integration (from future-work.md 2026-04-17)
