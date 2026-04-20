@@ -8,6 +8,20 @@ Current pinned versions:
 - @openai/codex: 0.121.0
 - @playwright/mcp: 0.0.70
 
+Pinned validation tools:
+- kubectl: v1.35.4
+- helm: v3.20.2 (stay on Helm 3 for now)
+- kustomize: v5.8.1
+- yq: v4.53.2
+- jq: apt-managed via ubuntu:24.04 package repos
+- opentofu: v1.11.6
+- tflint: v0.62.0
+- kubeconform: v0.7.0
+- kube-linter: v0.8.3
+- trivy: v0.70.0
+- flux: v2.8.5
+- sops: v3.12.2
+
 Update process:
 1. Base image digest:
    - Inspect the current multi-arch manifest index for ubuntu:24.04.
@@ -27,6 +41,60 @@ Update process:
 4. Verification:
    - Run go test ./... after every version bump.
    - Build a sandbox image on both amd64 and arm64 if the base digest changes.
+
+Validation tools update procedure:
+1. kubectl:
+   - Releases: https://github.com/kubernetes/kubernetes/releases and https://dl.k8s.io/release/stable.txt
+   - Check newer tag: curl -s https://api.github.com/repos/kubernetes/kubernetes/releases/latest | jq -r .tag_name
+   - Asset naming: use $(dpkg --print-architecture) for dl.k8s.io binary paths
+2. helm:
+   - Releases: https://github.com/helm/helm/releases
+   - Check newer tag: curl -s https://api.github.com/repos/helm/helm/releases/latest | jq -r .tag_name
+   - Asset naming: use $(dpkg --print-architecture) for linux-amd64/linux-arm64 tarballs
+3. kustomize:
+   - Releases: https://github.com/kubernetes-sigs/kustomize/releases
+   - Check newer tag: curl -s https://api.github.com/repos/kubernetes-sigs/kustomize/releases/latest | jq -r .tag_name
+   - Asset naming: keep the versioned kustomize%2Fv<version> URL segment and use $(dpkg --print-architecture)
+4. yq:
+   - Releases: https://github.com/mikefarah/yq/releases
+   - Check newer tag: curl -s https://api.github.com/repos/mikefarah/yq/releases/latest | jq -r .tag_name
+   - Asset naming: use $(dpkg --print-architecture) for yq_linux_amd64 / yq_linux_arm64
+5. jq:
+   - Releases: https://github.com/jqlang/jq/releases
+   - Check newer tag: curl -s https://api.github.com/repos/jqlang/jq/releases/latest | jq -r .tag_name
+   - Package source: jq is apt-managed here; verify the Ubuntu package version before deciding whether a repo/package-source change is needed
+6. opentofu:
+   - Releases: https://github.com/opentofu/opentofu/releases
+   - Check newer tag: curl -s https://api.github.com/repos/opentofu/opentofu/releases/latest | jq -r .tag_name
+   - Asset naming: use $(dpkg --print-architecture) for tofu_<version>_linux_amd64 / arm64 tarballs
+7. tflint:
+   - Releases: https://github.com/terraform-linters/tflint/releases
+   - Check newer tag: curl -s https://api.github.com/repos/terraform-linters/tflint/releases/latest | jq -r .tag_name
+   - Asset naming: use $(dpkg --print-architecture) for the versioned zip asset names
+8. kubeconform:
+   - Releases: https://github.com/yannh/kubeconform/releases
+   - Check newer tag: curl -s https://api.github.com/repos/yannh/kubeconform/releases/latest | jq -r .tag_name
+   - Asset naming: use $(dpkg --print-architecture) for kubeconform-linux-amd64 / arm64 tarballs
+9. kube-linter:
+   - Releases: https://github.com/stackrox/kube-linter/releases
+   - Check newer tag: curl -s https://api.github.com/repos/stackrox/kube-linter/releases/latest | jq -r .tag_name
+   - Asset naming: inspect release assets because amd64 uses kube-linter-linux.tar.gz while arm64 uses kube-linter-linux_arm64.tar.gz
+10. trivy:
+   - Releases: https://github.com/aquasecurity/trivy/releases
+   - Check newer tag: curl -s https://api.github.com/repos/aquasecurity/trivy/releases/latest | jq -r .tag_name
+   - Asset naming: map $(dpkg --print-architecture) to Trivy's 64bit / ARM64 archive names
+11. flux:
+   - Releases: https://github.com/fluxcd/flux2/releases
+   - Check newer tag: curl -s https://api.github.com/repos/fluxcd/flux2/releases/latest | jq -r .tag_name
+   - Asset naming: use $(dpkg --print-architecture) for flux_<version>_linux_amd64 / arm64 tarballs
+12. sops:
+   - Releases: https://github.com/getsops/sops/releases
+   - Check newer tag: curl -s https://api.github.com/repos/getsops/sops/releases/latest | jq -r .tag_name
+   - Asset naming: use $(dpkg --print-architecture) for sops-v<version>.linux.amd64 / arm64
+13. Validation verification:
+   - Update this comment block and the versioned URLs in the validation_tools RUN block in the same commit.
+   - Inspect release assets before bumping any multi-arch binary; use gh release view <tag> --repo <org>/<repo> when the filename pattern is unclear.
+   - Run go test ./... && go test -v ./integration -count=1 -timeout 20m after every bump.
 */ -}}
 FROM ubuntu:24.04@sha256:c4a8d5503dfb2a3eb8ab5f807da5bc69a85730fb49b5cfca2330194ebcc41c7b
 
@@ -46,6 +114,63 @@ COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY git-wrapper.sh /usr/local/bin/git
 COPY healthcheck-poller.sh /usr/local/bin/healthcheck-poller.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/git /usr/local/bin/healthcheck-poller.sh
+
+# validation_tools — pinned DevOps validation toolchain (FR62, NFR16). See header for version bump procedure.
+RUN set -eux; \
+    cd /tmp; \
+    dpkgArch="$(dpkg --print-architecture)"; \
+    case "${dpkgArch}" in \
+        amd64|arm64) ;; \
+        *) echo "unsupported architecture: ${dpkgArch}" >&2; exit 1 ;; \
+    esac; \
+    case "${dpkgArch}" in \
+        amd64) kubeLinterArchive="kube-linter-linux.tar.gz"; trivyArch="64bit" ;; \
+        arm64) kubeLinterArchive="kube-linter-linux_arm64.tar.gz"; trivyArch="ARM64" ;; \
+    esac; \
+    # kubectl: arch uses $(dpkg --print-architecture) => amd64|arm64
+    curl -fsSL "https://dl.k8s.io/release/v1.35.4/bin/linux/${dpkgArch}/kubectl" -o /tmp/kubectl && \
+    install -m 0755 /tmp/kubectl /usr/local/bin/kubectl && \
+    # helm: arch uses $(dpkg --print-architecture) => amd64|arm64
+    curl -fsSL "https://get.helm.sh/helm-v3.20.2-linux-${dpkgArch}.tar.gz" -o /tmp/helm.tar.gz && \
+    tar -xzf /tmp/helm.tar.gz -C /tmp && \
+    install -m 0755 "/tmp/linux-${dpkgArch}/helm" /usr/local/bin/helm && \
+    # kustomize: arch uses $(dpkg --print-architecture) => amd64|arm64
+    curl -fsSL "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.8.1/kustomize_v5.8.1_linux_${dpkgArch}.tar.gz" -o /tmp/kustomize.tar.gz && \
+    tar -xzf /tmp/kustomize.tar.gz -C /tmp kustomize && \
+    install -m 0755 /tmp/kustomize /usr/local/bin/kustomize && \
+    # yq: arch uses $(dpkg --print-architecture) => amd64|arm64
+    curl -fsSL "https://github.com/mikefarah/yq/releases/download/v4.53.2/yq_linux_${dpkgArch}" -o /tmp/yq && \
+    install -m 0755 /tmp/yq /usr/local/bin/yq && \
+    # opentofu: arch uses $(dpkg --print-architecture) => amd64|arm64
+    curl -fsSL "https://github.com/opentofu/opentofu/releases/download/v1.11.6/tofu_1.11.6_linux_${dpkgArch}.tar.gz" -o /tmp/tofu.tar.gz && \
+    tar -xzf /tmp/tofu.tar.gz -C /tmp tofu && \
+    install -m 0755 /tmp/tofu /usr/local/bin/tofu && \
+    # tflint: arch uses $(dpkg --print-architecture) => amd64|arm64
+    curl -fsSL "https://github.com/terraform-linters/tflint/releases/download/v0.62.0/tflint_linux_${dpkgArch}.zip" -o /tmp/tflint.zip && \
+    unzip -q /tmp/tflint.zip -d /tmp && \
+    install -m 0755 /tmp/tflint /usr/local/bin/tflint && \
+    # kubeconform: arch uses $(dpkg --print-architecture) => amd64|arm64
+    curl -fsSL "https://github.com/yannh/kubeconform/releases/download/v0.7.0/kubeconform-linux-${dpkgArch}.tar.gz" -o /tmp/kubeconform.tar.gz && \
+    tar -xzf /tmp/kubeconform.tar.gz -C /tmp kubeconform && \
+    install -m 0755 /tmp/kubeconform /usr/local/bin/kubeconform && \
+    # kube-linter: arch uses custom dpkg mapping => linux.tar.gz|linux_arm64.tar.gz
+    curl -fsSL "https://github.com/stackrox/kube-linter/releases/download/v0.8.3/${kubeLinterArchive}" -o /tmp/kube-linter.tar.gz && \
+    tar -xzf /tmp/kube-linter.tar.gz -C /tmp kube-linter && \
+    install -m 0755 /tmp/kube-linter /usr/local/bin/kube-linter && \
+    # trivy: arch uses custom dpkg mapping => 64bit|ARM64
+    curl -fsSL "https://github.com/aquasecurity/trivy/releases/download/v0.70.0/trivy_0.70.0_Linux-${trivyArch}.tar.gz" -o /tmp/trivy.tar.gz && \
+    tar -xzf /tmp/trivy.tar.gz -C /tmp trivy && \
+    install -m 0755 /tmp/trivy /usr/local/bin/trivy && \
+    # flux: arch uses $(dpkg --print-architecture) => amd64|arm64
+    curl -fsSL "https://github.com/fluxcd/flux2/releases/download/v2.8.5/flux_2.8.5_linux_${dpkgArch}.tar.gz" -o /tmp/flux.tar.gz && \
+    tar -xzf /tmp/flux.tar.gz -C /tmp flux && \
+    install -m 0755 /tmp/flux /usr/local/bin/flux && \
+    # sops: arch uses $(dpkg --print-architecture) => amd64|arm64
+    curl -fsSL "https://github.com/getsops/sops/releases/download/v3.12.2/sops-v3.12.2.linux.${dpkgArch}" -o /tmp/sops && \
+    install -m 0755 /tmp/sops /usr/local/bin/sops && \
+    mkdir -p /home/sandbox/.cache/trivy /home/sandbox/.cache/helm /home/sandbox/.kube /home/sandbox/.terraform.d /home/sandbox/.config/sops && \
+    chown -R sandbox:sandbox /home/sandbox/.cache /home/sandbox/.kube /home/sandbox/.terraform.d /home/sandbox/.config && \
+    rm -rf /tmp/*
 {{- if .SDKs.NodeJS}}
 
 ARG NODE_VERSION={{.SDKs.NodeJS}}

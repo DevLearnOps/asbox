@@ -106,7 +106,7 @@ func startTestContainer(ctx context.Context, t *testing.T, image string) testcon
 func execInContainer(ctx context.Context, t *testing.T, container testcontainers.Container, cmd []string) (string, int) {
 	t.Helper()
 
-	exitCode, reader, err := container.Exec(ctx, cmd)
+	exitCode, reader, err := container.Exec(ctx, cmd, tcexec.Multiplexed())
 	if err != nil {
 		t.Fatalf("exec in container failed: %v", err)
 	}

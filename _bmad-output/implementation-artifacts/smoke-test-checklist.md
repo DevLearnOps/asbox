@@ -76,6 +76,12 @@ Run after each story completion or significant change. Requires a valid API key 
 - [ ] `asbox init` generates starter config without requiring Docker
 - [ ] Generated config is valid YAML and can be used with `asbox build`
 
+## 11. Story 14.1 — DevOps Validation Toolchain
+
+- [ ] `trivy image alpine:latest` inside a fresh sandbox downloads the DB successfully
+- [ ] `helm template` on a real chart renders successfully inside the sandbox
+- [ ] `sops` encrypts and decrypts a test YAML with a local age key
+
 ---
 
 ## Post-Test Cleanup

@@ -15,6 +15,27 @@ You are running inside an isolated development sandbox container.
 - **Inner containers**: Build and run containers using `podman build` / `podman run` or `docker build` / `docker run`.
 - **Development SDKs**: Check installed SDKs with standard version commands (`node --version`, `go version`, `python3 --version`).
 
+## Installed Tooling
+
+### DevOps Validation
+
+- `kubectl` — Kubernetes CLI; use `--dry-run=client` offline.
+- `helm` — Chart renderer; use `helm template` offline.
+- `kustomize` — Overlay renderer; use `kustomize build <dir>`.
+- `yq` — YAML query tool; use for YAML edits.
+- `jq` — JSON query tool; already in the base image.
+- `opentofu` (`tofu`) — Terraform-compatible CLI; use fmt, validate, plan.
+- `tflint` — Terraform linter; pair with `tofu validate`.
+- `kubeconform` — Offline Kubernetes manifest schema validator.
+- `kube-linter` — Kubernetes YAML linter for config mistakes.
+- `trivy` — Container and filesystem vulnerability scanner.
+- `flux` — Flux CLI for GitOps build and diff.
+- `sops` — Secrets encryption/decryption with local keys.
+
+### Code Exploration
+
+Additional code-exploration tooling is pending and will be documented here when available.
+
 ## Working Directory
 
 Your primary workspace is `/workspace`, which is mounted from the host project directory.

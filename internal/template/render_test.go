@@ -457,6 +457,151 @@ func TestRender_dockerCompose(t *testing.T) {
 	}
 }
 
+func TestRender_validationToolsBlockPresent(t *testing.T) {
+	cfg := &config.Config{InstalledAgents: []string{"claude"}}
+	output, err := Render(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(output, "# validation_tools") {
+		t.Error("expected rendered Dockerfile to include validation_tools block")
+	}
+	if !strings.Contains(output, "/usr/local/bin/kubectl") {
+		t.Error("expected rendered Dockerfile to install kubectl into /usr/local/bin")
+	}
+}
+
+func TestRender_validationToolsAllElevenPresent(t *testing.T) {
+	// jq is intentionally omitted: it ships via the base apt-get install block
+	// (verified by TestRender_commonPackages). The other eleven tools are installed
+	// explicitly in the validation_tools RUN block as /usr/local/bin/<name>.
+	cfg := &config.Config{InstalledAgents: []string{"claude"}}
+	output, err := Render(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, tool := range []string{
+		"kubectl",
+		"helm",
+		"kustomize",
+		"yq",
+		"tofu",
+		"tflint",
+		"kubeconform",
+		"kube-linter",
+		"trivy",
+		"flux",
+		"sops",
+	} {
+		if !strings.Contains(output, "/usr/local/bin/"+tool) {
+			t.Errorf("expected validation tool %q installed at /usr/local/bin/%s", tool, tool)
+		}
+	}
+}
+
+func TestRender_validationToolsPinnedVersions(t *testing.T) {
+	cfg := &config.Config{InstalledAgents: []string{"claude"}}
+	output, err := Render(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	tests := []struct {
+		tool    string
+		version string
+	}{
+		{tool: "kubectl", version: "v1.35.4"},
+		{tool: "helm", version: "v3.20.2"},
+		{tool: "kustomize", version: "v5.8.1"},
+		{tool: "yq", version: "v4.53.2"},
+		{tool: "opentofu", version: "v1.11.6"},
+		{tool: "tflint", version: "v0.62.0"},
+		{tool: "kubeconform", version: "v0.7.0"},
+		{tool: "kube-linter", version: "v0.8.3"},
+		{tool: "trivy", version: "v0.70.0"},
+		{tool: "flux", version: "v2.8.5"},
+		{tool: "sops", version: "v3.12.2"},
+	}
+
+	for _, tt := range tests {
+		if !strings.Contains(output, tt.version) {
+			t.Errorf("expected %s version %q in rendered Dockerfile", tt.tool, tt.version)
+		}
+	}
+}
+
+func TestRender_validationToolsNoDynamicLatest(t *testing.T) {
+	// Rendered against an empty config so SDK/agent blocks that legitimately use
+	// `curl | bash` (nodesource, get-pip) or `api.github.com` are not emitted.
+	// Note: the Dockerfile header documents these forbidden strings in a
+	// Go-template comment (`{{- /* ... */ -}}`) which is stripped at render
+	// time, so the assertions below only reflect RUN-block content. If that
+	// comment wrapper is ever removed, these assertions will flip — intentionally.
+	output, err := Render(&config.Config{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(output, "api.github.com") {
+		t.Error("expected validation tools block to avoid api.github.com lookups")
+	}
+	if strings.Contains(output, "releases/latest") {
+		t.Error("expected validation tools block to avoid releases/latest lookups")
+	}
+	if strings.Contains(output, "| bash") {
+		t.Error("expected validation tools block to avoid curl | bash installers")
+	}
+}
+
+func TestRender_validationToolsUnconditional(t *testing.T) {
+	configs := []*config.Config{
+		{},
+		{InstalledAgents: []string{"claude"}},
+		{
+			InstalledAgents: []string{"claude", "gemini", "codex"},
+			SDKs:            config.SDKConfig{NodeJS: "22", Python: "3.12", Go: "1.23"},
+			MCP:             []string{"playwright"},
+		},
+	}
+
+	for i, cfg := range configs {
+		output, err := Render(cfg)
+		if err != nil {
+			t.Fatalf("config %d: unexpected error: %v", i, err)
+		}
+		if !strings.Contains(output, "# validation_tools") {
+			t.Errorf("config %d: expected validation_tools block in rendered Dockerfile", i)
+		}
+	}
+}
+
+func TestRender_cacheDirsChowned(t *testing.T) {
+	output, err := Render(&config.Config{InstalledAgents: []string{"claude"}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, dir := range []string{
+		"/home/sandbox/.cache/trivy",
+		"/home/sandbox/.cache/helm",
+		"/home/sandbox/.kube",
+		"/home/sandbox/.terraform.d",
+		"/home/sandbox/.config/sops",
+	} {
+		if !strings.Contains(output, dir) {
+			t.Errorf("expected cache directory %q to be created in rendered Dockerfile", dir)
+		}
+	}
+	for _, chownRoot := range []string{
+		"/home/sandbox/.cache",
+		"/home/sandbox/.kube",
+		"/home/sandbox/.terraform.d",
+		"/home/sandbox/.config",
+	} {
+		if !strings.Contains(output, "chown -R sandbox:sandbox") || !strings.Contains(output, chownRoot) {
+			t.Errorf("expected chown of %q to sandbox:sandbox in rendered Dockerfile", chownRoot)
+		}
+	}
+}
+
 func TestRender_claudeCodeAgent(t *testing.T) {
 	cfg := &config.Config{InstalledAgents: []string{"claude"}}
 	output, err := Render(cfg)
