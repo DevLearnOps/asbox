@@ -88,6 +88,7 @@ Renders the Dockerfile template, computes a content hash, and tags the image as 
 asbox run                            # Uses .asbox/config.yaml
 asbox run -f configs/gpu.yaml        # Uses custom config
 asbox run --no-cache                 # Force rebuild before running
+asbox run --fetch                    # Fetch origin refs for mounted repos before launch
 ```
 
 Validates that all declared secrets exist in your host environment, auto-builds if needed, then starts the container in TTY mode with the configured agent as the foreground process. Press `Ctrl+C` to stop cleanly — Tini handles signal forwarding with no orphaned processes.

@@ -31,6 +31,9 @@ func TestAutoIsolateDeps_logsVolumeCreation(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(projectDir, "package.json"), []byte(`{"name":"test"}`), 0644); err != nil {
 			t.Fatalf("writing package.json: %v", err)
 		}
+		if err := os.MkdirAll(filepath.Join(projectDir, "node_modules"), 0755); err != nil {
+			t.Fatalf("creating node_modules dir: %v", err)
+		}
 
 		// Write config with auto_isolate_deps + mount pointing to projectDir
 		configDir := t.TempDir()
@@ -71,6 +74,9 @@ func TestAutoIsolateDeps_logsVolumeCreation(t *testing.T) {
 			}
 			if err := os.WriteFile(filepath.Join(dir, "package.json"), fmt.Appendf(nil, `{"name":"%s"}`, filepath.Base(sub)), 0644); err != nil {
 				t.Fatalf("writing package.json in %s: %v", sub, err)
+			}
+			if err := os.MkdirAll(filepath.Join(dir, "node_modules"), 0755); err != nil {
+				t.Fatalf("creating node_modules in %s: %v", sub, err)
 			}
 		}
 

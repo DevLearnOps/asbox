@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/mcastellin/asbox/internal/config"
+	"github.com/mcastellin/asbox/internal/gitfetch"
 	"github.com/mcastellin/asbox/internal/mount"
 )
 
@@ -42,6 +43,13 @@ func resetRunCommandState(t *testing.T) {
 		t.Fatalf("reset no-cache flag: %v", err)
 	}
 	if flag := runCmd.Flags().Lookup("no-cache"); flag != nil {
+		flag.Changed = false
+	}
+
+	if err := runCmd.Flags().Set("fetch", "false"); err != nil {
+		t.Fatalf("reset fetch flag: %v", err)
+	}
+	if flag := runCmd.Flags().Lookup("fetch"); flag != nil {
 		flag.Changed = false
 	}
 
@@ -370,6 +378,258 @@ func TestRun_helpContainsPositionalAndShortFlag(t *testing.T) {
 		if !strings.Contains(output, want) {
 			t.Fatalf("help output missing %q\noutput:\n%s", want, output)
 		}
+	}
+}
+
+func TestRun_fetchFlag_default_isFalse(t *testing.T) {
+	flag := runCmd.Flags().Lookup("fetch")
+	if flag == nil {
+		t.Fatal("fetch flag not registered")
+	}
+	if flag.DefValue != "false" {
+		t.Fatalf("fetch flag default = %q, want %q", flag.DefValue, "false")
+	}
+	wantUsage := "Run 'git fetch origin' in all mounted repos before launch, using host credentials. Refs-only — never touches working tree. Non-fatal on failure."
+	if flag.Usage != wantUsage {
+		t.Fatalf("fetch flag usage = %q, want %q", flag.Usage, wantUsage)
+	}
+}
+
+func TestRun_helpContainsFetchFlag(t *testing.T) {
+	resetRunCommandState(t)
+	r := newRootCmd()
+	err := r.run("run", "--help")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	output := r.output()
+	for _, want := range []string{
+		"--fetch",
+		"Run 'git fetch origin' in all mounted repos before launch, using host credentials. Refs-only — never touches working tree. Non-fatal on failure.",
+		"Refs-only",
+		"Non-fatal on failure",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("help output missing %q\noutput:\n%s", want, output)
+		}
+	}
+}
+
+func TestRun_fetchNotPassed_noFetchPhase(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := writeRunConfig(t, dir, `
+installed_agents: [claude]
+mounts:
+  - source: ./missing-workspace
+    target: /workspace
+`)
+
+	old := configFile
+	configFile = cfgPath
+	t.Cleanup(func() { configFile = old })
+
+	resetRunCommandState(t)
+	r := newRootCmd()
+	err := r.run("run")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	var ce *config.ConfigError
+	if !errors.As(err, &ce) {
+		t.Fatalf("expected *config.ConfigError, got %T: %v", err, err)
+	}
+	output := r.output()
+	if strings.Contains(output, "fetching ") || strings.Contains(output, "fetched ") {
+		t.Fatalf("unexpected fetch output when --fetch was omitted:\n%s", output)
+	}
+}
+
+func TestFormatFetchSummary_tableDriven(t *testing.T) {
+	tests := []struct {
+		name     string
+		summary  gitfetch.FetchSummary
+		want     string
+		wantWarn bool
+	}{
+		{
+			name:    "all succeed",
+			summary: gitfetch.FetchSummary{Total: 3, Succeeded: 3},
+			want:    "fetched 3/3 repositories",
+		},
+		{
+			name:    "single repo succeed",
+			summary: gitfetch.FetchSummary{Total: 1, Succeeded: 1},
+			want:    "fetched 1/1 repositories",
+		},
+		{
+			name:    "one skip not git",
+			summary: gitfetch.FetchSummary{Total: 3, Succeeded: 2, SkippedNotGit: 1},
+			want:    "fetched 2/3 repositories (1 not a git repo)",
+		},
+		{
+			name:    "one skip no origin",
+			summary: gitfetch.FetchSummary{Total: 3, Succeeded: 2, SkippedNoOrigin: 1},
+			want:    "fetched 2/3 repositories (1 no origin remote)",
+		},
+		{
+			name:    "mixed skips",
+			summary: gitfetch.FetchSummary{Total: 3, Succeeded: 1, SkippedNoOrigin: 1, SkippedNotGit: 1},
+			want:    "fetched 1/3 repositories (1 no origin remote, 1 not a git repo)",
+		},
+		{
+			name:     "single failure",
+			summary:  gitfetch.FetchSummary{Total: 3, Succeeded: 2, Failed: 1},
+			want:     "WARNING: fetched 2/3 repositories (1 failed) — see warnings above",
+			wantWarn: true,
+		},
+		{
+			name:     "failure and skips",
+			summary:  gitfetch.FetchSummary{Total: 4, Succeeded: 1, Failed: 2, SkippedNoOrigin: 1},
+			want:     "WARNING: fetched 1/4 repositories (2 failed, 1 no origin remote) — see warnings above",
+			wantWarn: true,
+		},
+		{
+			name:     "failure and both skips",
+			summary:  gitfetch.FetchSummary{Total: 5, Succeeded: 1, Failed: 2, SkippedNoOrigin: 1, SkippedNotGit: 1},
+			want:     "WARNING: fetched 1/5 repositories (2 failed, 1 no origin remote, 1 not a git repo) — see warnings above",
+			wantWarn: true,
+		},
+		{
+			name:    "two skips no origin stays singular",
+			summary: gitfetch.FetchSummary{Total: 4, Succeeded: 2, SkippedNoOrigin: 2},
+			want:    "fetched 2/4 repositories (2 no origin remote)",
+		},
+		{
+			name:    "two skips not git stays singular",
+			summary: gitfetch.FetchSummary{Total: 4, Succeeded: 2, SkippedNotGit: 2},
+			want:    "fetched 2/4 repositories (2 not a git repo)",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, gotWarn := formatFetchSummary(tt.summary)
+			if got != tt.want {
+				t.Fatalf("formatFetchSummary() = %q, want %q", got, tt.want)
+			}
+			if gotWarn != tt.wantWarn {
+				t.Fatalf("warning = %v, want %v", gotWarn, tt.wantWarn)
+			}
+		})
+	}
+}
+
+func TestRun_fetchWithBadTimeoutEnv_returnsConfigError(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := writeRunConfig(t, dir, `
+installed_agents: [claude]
+`)
+
+	old := configFile
+	configFile = cfgPath
+	t.Cleanup(func() { configFile = old })
+	t.Setenv("ASBOX_FETCH_TIMEOUT", "notaduration")
+
+	resetRunCommandState(t)
+	r := newRootCmd()
+	err := r.run("run", "--fetch")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	var ce *config.ConfigError
+	if !errors.As(err, &ce) {
+		t.Fatalf("expected *config.ConfigError, got %T: %v", err, err)
+	}
+	if got := exitCode(err); got != 1 {
+		t.Fatalf("exitCode = %d, want 1", got)
+	}
+	for _, want := range []string{
+		`ASBOX_FETCH_TIMEOUT value "notaduration"`,
+		"Use a Go duration string like 60s, 2m, 500ms",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error = %q, want to contain %q", err.Error(), want)
+		}
+	}
+}
+
+func TestRun_fetchWithNonPositiveTimeoutEnv_returnsConfigError(t *testing.T) {
+	for _, raw := range []string{"0", "0s", "-1s"} {
+		t.Run(raw, func(t *testing.T) {
+			dir := t.TempDir()
+			cfgPath := writeRunConfig(t, dir, `
+installed_agents: [claude]
+`)
+
+			old := configFile
+			configFile = cfgPath
+			t.Cleanup(func() { configFile = old })
+			t.Setenv("ASBOX_FETCH_TIMEOUT", raw)
+
+			resetRunCommandState(t)
+			r := newRootCmd()
+			err := r.run("run", "--fetch")
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+
+			var ce *config.ConfigError
+			if !errors.As(err, &ce) {
+				t.Fatalf("expected *config.ConfigError, got %T: %v", err, err)
+			}
+			if got := exitCode(err); got != 1 {
+				t.Fatalf("exitCode = %d, want 1", got)
+			}
+			if !strings.Contains(err.Error(), "must be positive") {
+				t.Fatalf("error = %q, want 'must be positive'", err.Error())
+			}
+		})
+	}
+}
+
+func TestFirstLineOfStderrOrErr_contract(t *testing.T) {
+	tests := []struct {
+		name   string
+		result gitfetch.FetchResult
+		want   string
+	}{
+		{
+			name:   "stderr first line trimmed",
+			result: gitfetch.FetchResult{Stderr: "  fatal: could not resolve host: example.com  \nadditional noise\n"},
+			want:   "fatal: could not resolve host: example.com",
+		},
+		{
+			name:   "falls back to err when stderr empty",
+			result: gitfetch.FetchResult{Stderr: "", Err: errors.New("exit status 128")},
+			want:   "exit status 128",
+		},
+		{
+			name:   "falls back to err when stderr is only whitespace",
+			result: gitfetch.FetchResult{Stderr: "   \n", Err: errors.New("exit status 128")},
+			want:   "exit status 128",
+		},
+		{
+			name:   "timeout error surfaces via err fallback",
+			result: gitfetch.FetchResult{Err: fmt.Errorf("%w after 1ms (override with ASBOX_FETCH_TIMEOUT)", gitfetch.ErrTimeout)},
+			want:   "fetch timed out after 1ms (override with ASBOX_FETCH_TIMEOUT)",
+		},
+		{
+			name:   "no signal at all",
+			result: gitfetch.FetchResult{},
+			want:   "fetch failed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := firstLineOfStderrOrErr(tt.result)
+			if got != tt.want {
+				t.Fatalf("firstLineOfStderrOrErr() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 

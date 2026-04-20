@@ -100,3 +100,14 @@ Last updated: 2026-04-17 (code review of story 11-6)
 - `resetRunCommandState` mutates pflag's `flag.Changed` struct field directly — works but reaches into library internals. Latent breakage if pflag's internal layout changes. [cmd/run_test.go:31-61]
 - Package-level `rootCmd`/`runCmd` shared across tests — any future `t.Parallel()` on unit tests would race on `SetArgs` and flag state. Pre-existing architectural constraint. [cmd/root.go]
 - Control-character echoing in `ValidateAgent` unsupported-agent error — raw positional interpolated into the `ConfigError` message; inputs with `\n`/`\r` produce multi-line terminal output. Error-path only. [internal/config/parse.go:229]
+
+## Deferred from: code review of 13-2-fetch-flag-for-upstream-sync (2026-04-20)
+
+- Parent ctx cancellation (Ctrl+C) reports generic "fetch failed" instead of a cancellation distinct from `DeadlineExceeded` — all in-flight fetch workers surface misleading warnings on clean interrupt. Spec Task 3.11 explicitly accepts this ("acceptable blast radius"). [internal/gitfetch/fetch.go:179-188]
+- `fetchRepoFn` package-global mutable var has no mutex — latent race if tests ever run in parallel. Test-only surface today. [internal/gitfetch/fetch.go:55]
+- Hardcoded 1-second timeout for `git remote get-url origin` is locale/NFS-fragile — slow FS or non-English `LANG` could misclassify as `StatusSkippedNoOrigin`. Spec Task 2.7 prescribes 1s. [internal/gitfetch/fetch.go:194]
+- Project-dir derivation `filepath.Dir(filepath.Dir(absConfigFile))` assumes config lives at `<project>/.asbox/config.yaml` — a `-f /other/path.yaml` invocation could resolve to an unintended ancestor with a `.git` entry. Spec is permissive. [cmd/run.go:145]
+- Full-stderr output in per-repo warning admits terminal-escape injection from hostile remotes and can flood the terminal on large packfile errors. Partially mitigated when warning is reduced to first-line-only. [cmd/run.go:172-178]
+- `FetchResult.Path` is the raw input string for preamble entries but the canonical `EvalSymlinks` result for fetched entries — user-facing warnings display inconsistent path formats. [internal/gitfetch/fetch.go:129,136,155]
+- `TestFetchAll_gitWorktreeMarkerCountsAsRepo` uses `git worktree add` (real worktree with a working origin), whereas Task 4.5 asked for a manually-created `.git` file with an empty gitdir target to lock a different invariant. Existing test is still useful. [internal/gitfetch/fetch_test.go:121]
+- `filepath.Abs(configFile)` failure returns raw error instead of `*config.ConfigError` — inconsistent with the neighboring `ASBOX_FETCH_TIMEOUT` error routing. Unlikely in practice (would require a deleted cwd). [cmd/run.go:130-133]

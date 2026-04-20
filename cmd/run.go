@@ -6,10 +6,14 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/mcastellin/asbox/internal/config"
 	"github.com/mcastellin/asbox/internal/docker"
+	"github.com/mcastellin/asbox/internal/gitfetch"
 	"github.com/mcastellin/asbox/internal/mount"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -121,6 +125,63 @@ var runCmd = &cobra.Command{
 			}
 		}
 
+		fetchEnabled, _ := cmd.Flags().GetBool("fetch")
+		if fetchEnabled {
+			absConfigFile, err := filepath.Abs(configFile)
+			if err != nil {
+				return err
+			}
+
+			fetchTimeout := gitfetch.DefaultTimeout
+			if rawTimeout := os.Getenv("ASBOX_FETCH_TIMEOUT"); rawTimeout != "" {
+				fetchTimeout, err = time.ParseDuration(rawTimeout)
+				if err != nil {
+					return &config.ConfigError{
+						Msg: fmt.Sprintf("invalid ASBOX_FETCH_TIMEOUT value %q: %s. Use a Go duration string like 60s, 2m, 500ms", rawTimeout, err),
+					}
+				}
+				if fetchTimeout <= 0 {
+					return &config.ConfigError{
+						Msg: fmt.Sprintf("invalid ASBOX_FETCH_TIMEOUT value %q: must be positive. Use a Go duration string like 60s, 2m, 500ms", rawTimeout),
+					}
+				}
+			}
+
+			projectDir := filepath.Dir(filepath.Dir(absConfigFile))
+			paths := append([]string{projectDir}, cfg.BmadRepos...)
+			dedupedPaths := gitfetch.DedupPaths(paths)
+			fetchConcurrency := gitfetch.DefaultConcurrency
+
+			fmt.Fprintf(
+				cmd.OutOrStdout(),
+				"fetching %d repositories (timeout %s each, %d concurrent)...\n",
+				len(dedupedPaths),
+				formatFetchTimeout(fetchTimeout),
+				fetchConcurrency,
+			)
+
+			summary := gitfetch.FetchAll(cmd.Context(), dedupedPaths, gitfetch.FetchOptions{
+				Timeout:     fetchTimeout,
+				Concurrency: fetchConcurrency,
+			})
+
+			for _, result := range summary.Results {
+				switch result.Status {
+				case gitfetch.StatusSkippedNoOrigin:
+					fmt.Fprintf(cmd.OutOrStdout(), "info: no origin remote in %s, skipping fetch\n", result.Path)
+				case gitfetch.StatusFailed:
+					fmt.Fprintf(cmd.ErrOrStderr(), "warning: fetch failed for %s: %s\n", result.Path, firstLineOfStderrOrErr(result))
+				}
+			}
+
+			summaryLine, warning := formatFetchSummary(summary)
+			if warning {
+				fmt.Fprintln(cmd.ErrOrStderr(), summaryLine)
+			} else {
+				fmt.Fprintln(cmd.OutOrStdout(), summaryLine)
+			}
+		}
+
 		agentCmd, err := agentCommand(cfg.DefaultAgent)
 		if err != nil {
 			return err
@@ -199,6 +260,51 @@ func buildEnvVars(cfg *config.Config) (map[string]string, error) {
 	return envVars, nil
 }
 
+func formatFetchSummary(summary gitfetch.FetchSummary) (string, bool) {
+	base := fmt.Sprintf("fetched %d/%d repositories", summary.Succeeded, summary.Total)
+	parts := make([]string, 0, 3)
+
+	if summary.Failed > 0 {
+		parts = append(parts, fmt.Sprintf("%d failed", summary.Failed))
+	}
+	if summary.SkippedNoOrigin > 0 {
+		parts = append(parts, fmt.Sprintf("%d no origin remote", summary.SkippedNoOrigin))
+	}
+	if summary.SkippedNotGit > 0 {
+		parts = append(parts, fmt.Sprintf("%d not a git repo", summary.SkippedNotGit))
+	}
+
+	if len(parts) == 0 {
+		return base, false
+	}
+
+	parenthetical := strings.Join(parts, ", ")
+	if summary.Failed > 0 {
+		return fmt.Sprintf("WARNING: %s (%s) — see warnings above", base, parenthetical), true
+	}
+	return fmt.Sprintf("%s (%s)", base, parenthetical), false
+}
+
+func firstLineOfStderrOrErr(result gitfetch.FetchResult) string {
+	if result.Stderr != "" {
+		line := strings.TrimSpace(strings.SplitN(result.Stderr, "\n", 2)[0])
+		if line != "" {
+			return line
+		}
+	}
+	if result.Err != nil {
+		return result.Err.Error()
+	}
+	return "fetch failed"
+}
+
+func formatFetchTimeout(timeout time.Duration) string {
+	if timeout%time.Second == 0 {
+		return fmt.Sprintf("%ds", timeout/time.Second)
+	}
+	return timeout.String()
+}
+
 func randomSuffix() string {
 	b := make([]byte, 3)
 	if _, err := crand.Read(b); err != nil {
@@ -238,5 +344,6 @@ func agentInstructionTarget(agent string) (string, error) {
 func init() {
 	runCmd.Flags().Bool("no-cache", false, "Force a complete rebuild, bypassing content-hash check and Docker layer cache")
 	runCmd.Flags().StringP("agent", "a", "", "Override default agent for this session (e.g., claude, gemini, codex). Also accepted as a positional argument.")
+	runCmd.Flags().Bool("fetch", false, "Run 'git fetch origin' in all mounted repos before launch, using host credentials. Refs-only — never touches working tree. Non-fatal on failure.")
 	rootCmd.AddCommand(runCmd)
 }

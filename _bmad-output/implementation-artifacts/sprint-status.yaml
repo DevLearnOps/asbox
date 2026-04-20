@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: "2026-04-08"
-last_updated: "2026-04-18"  # Story 12.1 code review complete; status -> done
+last_updated: "2026-04-20"  # Story 13.2 code review complete (10 patches applied); status -> done
 
 
 
@@ -127,9 +127,9 @@ development_status:
   epic-12-retrospective: optional
 
   # Epic 13: Multi-Repo State Management (from future-work.md 2026-04-17)
-  epic-13: backlog
-  13-1-branch-management-guidance-in-agent-instructions: backlog
-  13-2-fetch-flag-for-upstream-sync: backlog
+  epic-13: in-progress  # first story contexted 2026-04-18 (13.2)
+  13-1-branch-management-guidance-in-agent-instructions: backlog # HOLD THIS STORY. Specs are not clear.
+  13-2-fetch-flag-for-upstream-sync: done
   epic-13-retrospective: optional
 
   # Epic 14: Pre-Installed Validation & Exploration Toolchain (from future-work.md 2026-04-17)
