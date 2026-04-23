@@ -282,6 +282,27 @@ asbox/
 - **Implementation:** `internal/mount/` package assembles mount flags with existence, directory, and collision checks. Go `text/template` generates agent instruction file (CLAUDE.md/GEMINI.md/CODEX.md) with repo list. Instruction file mounted into container at agent's expected config location.
 - **Affects:** `internal/mount/` (existence/directory/collision checks + mount assembly), `embed/agent-instructions.md` (Go template), `cmd/run.go` (mount + instruction generation)
 
+### Project-Specific Agent Instructions Extension (`agent_instructions`)
+
+- **Decision:** Optional config field `agent_instructions` (string path, relative to config file location) pointing to a markdown file whose contents are appended to the generated agent instruction file via a new `{{if .ProjectExtension}}` block in `embed/agent-instructions.md.tmpl`. Applies uniformly to whichever agent launches (claude/gemini/codex) because the template output is agent-agnostic — only the mount target changes (`agentInstructionTarget()` is unchanged).
+- **Rationale:** Projects have project-specific constraints (conventions, deployment gates, "don't touch X") that don't belong in the generic template and shouldn't require forking asbox. A project-root `CLAUDE.md` works for one agent but breaks when the user switches runtime via `--agent` — this violates DRY. One extension file applied through the shared template solves both.
+- **Fail-closed on missing file:** If `agent_instructions` is set but the file does not exist or is not readable, `AssembleAgentInstructions()` returns `ConfigError{Msg: "agent_instructions path '<path>' not found. Check agent_instructions in .asbox/config.yaml"}` (or "is not readable") and the CLI exits with code 1. Matches the `bmad_repos` policy (fail-closed for declared workspace inputs) — opposite of `host_agent_config` (silent-skip for optional OAuth convenience). Rationale: if the user explicitly names a file, a missing file is a user error, not a convenience. Silent-skip would let a typo become "the agent silently ignored my project conventions for three weeks."
+- **Decoupling from bmad_repos:** Current `AssembleBmadRepos()` generates and mounts the instruction file only when `bmad_repos` is non-empty. This function is renamed/broadened to `AssembleAgentInstructions(cfg, configPath) (bmadMounts []string, instructionContent string, error)` and runs whenever **either** `bmad_repos` is non-empty **or** `agent_instructions` is set. File renames from `internal/mount/bmad_repos.go` to `internal/mount/agent_instructions.go`; the bmad_repos mount-assembly logic stays co-located because it shares the output file. Existing behavior (bmad_repos set, agent_instructions unset) is byte-identical.
+- **Template integration:** The template gains a new data field `ProjectExtension string` on `InstructionData`. The trailing block is:
+  ```gotemplate
+  {{- if .ProjectExtension}}
+
+  ## Project-Specific Instructions
+
+  {{.ProjectExtension}}
+  {{- end}}
+  ```
+  Verbatim-passthrough — no further transformation of extension content. The extension owns its internal markdown structure.
+- **Path resolution:** `agent_instructions` resolves relative to the config file's directory (same rule as `mounts`). Matches the existing path-resolution convention (see Cross-Cutting Concerns).
+- **Validation location:** Runs at runtime in `internal/mount/agent_instructions.go`, not at config-parse time. Matches the pattern used by `bmad_repos`, `mounts`, and `isolate_deps` — keeps `internal/config/parse.go` pure (no filesystem dependency).
+- **Content-hash impact:** None. The extension content is read at runtime, not baked into the image — bumping the extension file does NOT trigger an image rebuild. The extension lives at the instruction-file-mount layer, parallel to bmad_repos (which also does not trigger rebuilds).
+- **Affects:** `internal/config/config.go` (new `AgentInstructions` field), `internal/mount/agent_instructions.go` (renamed file, broadened function, new validation), `embed/agent-instructions.md.tmpl` (new trailing block), `cmd/run.go` (rename call site, decouple mount-gating condition from `len(bmadMounts) > 0`)
+
 ### Host Agent Config (`host_agent_config`)
 
 - **Decision:** Boolean flag (default: true) that automatically mounts the host agent config directory read-write into the container, with paths resolved from the agent config registry based on the selected agent at runtime
@@ -544,10 +565,10 @@ asbox/
 │   ├── mount/                       # Mount assembly and dependency isolation
 │   │   ├── mount.go                 # AssembleMounts() — regular mounts; AssembleHostAgentConfig() — agent-aware config mount
 │   │   ├── isolate_deps.go          # ScanDeps() — filepath.WalkDir for package.json, volume flags
-│   │   ├── bmad_repos.go            # AssembleBmadRepos() — repo mounts, collision detection, instruction gen
+│   │   ├── agent_instructions.go    # AssembleAgentInstructions() — bmad_repos mounts + collision detection + instruction file gen with project extension
 │   │   ├── mount_test.go
 │   │   ├── isolate_deps_test.go
-│   │   └── bmad_repos_test.go
+│   │   └── agent_instructions_test.go
 │   └── gitfetch/                    # Host-side git inspection: --fetch and dirty-tree warning
 │       ├── fetch.go                 # FetchAll() — concurrent `git fetch origin` with timeout, dedup, buffered output
 │       ├── fetch_test.go
@@ -719,6 +740,7 @@ var Assets embed.FS
 | FR65 (`--fetch`) | `cmd/run.go`, `internal/gitfetch/fetch.go` | Flag → `FetchAll()` call before `docker run`; origin-only, per-repo timeout (env-var hint surfaced inline in timeout failure messages), dedup, buffered output, pre-fetch anchor line, short happy-path summary (`fetched N/N repositories`), expanded-skip-category summary on mixed outcome, WARNING-prefixed summary on failure, condensed `--help` text |
 | FR66 (k8s POC) | N/A (deferred research) | See exploratory architecture decision; no implementation mapping |
 | FR67 (dirty-tree warning) | `cmd/run.go`, `internal/gitfetch/dirty.go` | `DetectDirty()` call after fetch phase; `git status --porcelain --ignored=no`, non-fatal, suppressible via `ASBOX_SUPPRESS_DIRTY_WARNING` (self-advertised in the warning block's closing line); block's closing text instructs `Ctrl+C now` rather than "review before proceeding" (matches actual user agency — launch is already rolling) |
+| FR68 (agent_instructions extension) | `internal/mount/agent_instructions.go`, `embed/agent-instructions.md.tmpl` | `AssembleAgentInstructions()` + `{{if .ProjectExtension}}` template block — read project file at runtime, fail-closed on missing, append as trailing section in generated instruction file |
 | NFR15 (integration tests) | `integration/` | testcontainers-go test suite |
 | NFR16 (pinned toolchain) | `embed/Dockerfile.tmpl` | Single comment-block header documenting all pinned versions and update process |
 

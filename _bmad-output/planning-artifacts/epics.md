@@ -90,6 +90,7 @@ FR64: Generated bmad_repos agent instructions include explicit branch-management
 FR65: Developer can pass `--fetch` to `asbox run` to run host-side `git fetch origin` (not `--all`) across all mounted repositories before the agent launches, with a pre-fetch anchor line (announcing repo count, timeout, concurrency), per-repo timeout (with `ASBOX_FETCH_TIMEOUT` override surfaced inline in timeout failure messages), canonical-path dedup, buffered output, a short happy-path summary (`fetched N/N repositories`) that expands to name non-zero skip categories when present, and a `WARNING:`-prefixed stderr summary on partial failure. Updates `refs/remotes/origin/*` only — never the working tree
 FR66 (exploratory): System supports experimental integration paths for a local Kubernetes cluster — research spike with three evaluation tracks (in-sandbox kind, host k3s with kubeconfig injection, TBD alternatives)
 FR67: `asbox run` warns non-fatally at launch when any mounted git repository has a dirty working tree (modified/staged/untracked, ignoring `.gitignore`d files); suppressible via `ASBOX_SUPPRESS_DIRTY_WARNING=1` — and the warning block itself self-advertises the suppression env var as its closing line, so users do not have to read docs to silence noise in CI
+FR68: Developer can set `agent_instructions` in config to a markdown file path; its contents are appended to the generated agent instruction file (CLAUDE.md / GEMINI.md / AGENTS.md), uniformly across all installed agents via the shared template. Fail-closed on missing/unreadable file. Decouples instruction-file generation from bmad_repos presence
 
 ### NonFunctional Requirements
 
@@ -233,6 +234,7 @@ N/A — asbox is a CLI tool with no GUI. No UX design document applicable.
 | FR63 | Epic 14 | Pre-installed code exploration tools |
 | NFR16 | Epic 14 | Pinned versions for pre-installed toolchain |
 | FR66 | Epic 15 (POC) | Local Kubernetes cluster integration research spike |
+| FR68 | Epic 16 | agent_instructions extension — project-specific markdown appended to agent instruction file |
 
 ## Epic List
 
@@ -303,6 +305,10 @@ The sandbox image ships with a pinned DevOps validation toolchain (kubectl, helm
 ### Epic 15 (Research/POC): Local Kubernetes Cluster Integration
 Research spike evaluating whether and how to expose a disposable local Kubernetes cluster to the sandboxed agent. Three evaluation tracks are on the table: (a) `kind` inside the sandbox via inner Podman, (b) host-side `k3s`/`kind` with kubeconfig injection, (c) alternatives surfaced by the spike. Output is a recommendation, prototype, and security analysis. Productionization is gated on the spike outcome and not committed here.
 **FRs covered:** FR66 (exploratory)
+
+### Epic 16: Project-Specific Agent Instructions Extension
+A developer can drop a project-local markdown file (`agent_instructions` config field) that gets appended to the generated agent instruction file, applied uniformly to whichever agent launches (claude/gemini/codex) via the shared template. DRY: one extension file covers every agent runtime. Fail-closed on missing/unreadable file (matches bmad_repos policy). The instruction-file generation/mount is decoupled from bmad_repos presence — it now runs whenever agent_instructions OR bmad_repos is set.
+**FRs covered:** FR68
 
 ## Epic 1: Developer Can Build and Launch a Sandbox
 
@@ -1826,3 +1832,71 @@ So that I can decide whether (and how) to productionize local cluster access wit
 - Prototype artifact: a branch (not merged) that demonstrates the recommended track working end-to-end with a sample manifest.
 - This story is intentionally open-ended — do not pre-commit to implementation details. The goal is decision-quality information, not implementation.
 - Follow-up stories (15.2+) will be defined after the spike based on the recommendation.
+
+## Epic 16: Project-Specific Agent Instructions Extension
+
+A developer can inject project-specific instructions into the generated agent instruction file via a single config field, applied uniformly across all installed agents. Solves the DRY gap where a project-root `CLAUDE.md` worked for only one agent and broke under `--agent` overrides.
+
+### Story 16.1: Configurable Agent Instructions Extension
+
+As a developer,
+I want to configure a path to a project-local markdown file that gets appended to the agent's instruction file,
+So that my project-specific constraints and conventions are visible to whichever agent I launch — without forking asbox or duplicating a file per agent.
+
+**Acceptance Criteria:**
+
+**Given** a developer sets `agent_instructions: ./AGENT_INSTRUCTIONS.md` in `.asbox/config.yaml` and the file exists
+**When** they run `asbox run`
+**Then** the rendered agent instruction file mounted into the container contains the extension file's contents under a trailing `## Project-Specific Instructions` section, verbatim
+
+**Given** a developer sets `agent_instructions` and installs both `claude` and `gemini`
+**When** they launch with `-a claude` and then separately with `-a gemini`
+**Then** both runs produce an instruction file with the same project-specific section (the mount target differs per agent via `agentInstructionTarget()` but the template output is agent-agnostic)
+
+**Given** `agent_instructions` is set but the file does not exist at launch
+**When** the CLI runs
+**Then** it exits with code 1 and prints `"error: agent_instructions path '<path>' not found. Check agent_instructions in .asbox/config.yaml"` to stderr — no partial launch
+
+**Given** `agent_instructions` is set but the file exists and is not readable (permissions)
+**When** the CLI runs
+**Then** it exits with code 1 with a descriptive error naming the path and the config field
+
+**Given** `agent_instructions` is unset or empty
+**When** the CLI runs
+**Then** behavior is unchanged — the instruction file is generated and mounted only when `bmad_repos` is non-empty (existing behavior preserved byte-identically)
+
+**Given** `agent_instructions` is set and `bmad_repos` is empty
+**When** the CLI runs
+**Then** the instruction file is still generated and mounted — the mount is no longer gated solely on `bmad_repos`
+
+**Given** `agent_instructions` is set and `bmad_repos` is also non-empty
+**When** the CLI runs
+**Then** the rendered file contains both the Multi-Repo Workspace section (from `bmad_repos`) and the Project-Specific Instructions section (from `agent_instructions`)
+
+**Given** the `agent_instructions` value is a relative path
+**When** the CLI resolves it
+**Then** it is resolved relative to the directory containing the config file, not the working directory (same rule as `mounts`)
+
+**Implementation Notes:**
+
+- `internal/config/config.go`: add `AgentInstructions string `yaml:"agent_instructions"`` to `Config` struct. No validation in `parse.go` — deferred to mount-assembly.
+- `internal/mount/bmad_repos.go` → rename to `internal/mount/agent_instructions.go`; rename `AssembleBmadRepos(cfg)` → `AssembleAgentInstructions(cfg, configPath)`. Broaden the early-return guard: run whenever `len(cfg.BmadRepos) > 0` OR `cfg.AgentInstructions != ""`. When only `agent_instructions` is set, `bmadMounts` stays empty and only the instruction file is produced.
+- File read: `os.ReadFile(resolved-path)`; `os.IsNotExist(err)` → fail-closed ConfigError with `not found` message; other read errors → ConfigError with `is not readable: <err>` message. The `configPath` argument gives the base directory for relative-path resolution via `filepath.Join(filepath.Dir(configPath), cfg.AgentInstructions)` — then `filepath.Abs`.
+- Template data: extend `InstructionData` with `ProjectExtension string`. Assign the read file content (not the path) to this field.
+- Template: append a trailing `{{- if .ProjectExtension}}` block that renders a `## Project-Specific Instructions` heading followed by `{{.ProjectExtension}}`. Trim markers (`{{-`) matter — avoid leading blank lines when `bmad_repos` is also set.
+- `internal/mount/bmad_repos_test.go` → rename to `agent_instructions_test.go`. New test cases:
+  - `agent_instructions` set, file exists → rendered content contains `## Project-Specific Instructions` and the file body verbatim.
+  - `agent_instructions` set, file missing → ConfigError with `not found`.
+  - `agent_instructions` set, `bmad_repos` empty → mounts list is empty but `instructionContent` is non-empty.
+  - `agent_instructions` set, `bmad_repos` non-empty → rendered content contains both sections.
+  - `agent_instructions` unset, `bmad_repos` non-empty → rendered content unchanged from today (regression guard).
+  - Relative-path resolution against the config-file directory.
+- `cmd/run.go`: rename the call site; pass `configFile`. The existing `if instructionContent != ""` trigger is already correct — it fires when either bmad_repos OR the extension produces content. The `if len(bmadMounts) > 0` block for the "bmad_repos: mounting N" log stays gated on `bmadMounts` (log is about repo mounts, not about the instruction file).
+- Exit code mapping: no changes to `cmd/root.go`. `ConfigError` already maps to exit code 1.
+- `embed/config.yaml` (starter): add a commented-out example line:
+  ```yaml
+  # Optional: append project-specific instructions to the generated agent file
+  # (CLAUDE.md / GEMINI.md / AGENTS.md). Path is relative to this config file.
+  # agent_instructions: ../AGENT_INSTRUCTIONS.md
+  ```
+- No integration test required — the behavior is observable via a binary invocation test plus the unit tests above. Add an integration test only if the existing bmad_repos integration coverage doesn't exercise the instruction-file mount path.
