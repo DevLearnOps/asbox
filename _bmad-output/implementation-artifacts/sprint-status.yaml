@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: "2026-04-08"
-last_updated: "2026-04-23"  # sprint change 2026-04-23: Epic 16 added (agent_instructions extension)
+last_updated: "2026-04-24"  # 2026-04-24: Story 16.1 code review complete, moved to done
 
 
 
@@ -144,6 +144,6 @@ development_status:
   epic-15-retrospective: optional
 
   # Epic 16: Project-Specific Agent Instructions Extension (sprint change 2026-04-23)
-  epic-16: backlog
-  16-1-configurable-agent-instructions-extension: backlog
+  epic-16: in-progress  # first story contexted 2026-04-23 (16.1)
+  16-1-configurable-agent-instructions-extension: done  # code review complete 2026-04-24
   epic-16-retrospective: optional

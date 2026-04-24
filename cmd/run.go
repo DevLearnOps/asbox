@@ -73,8 +73,8 @@ var runCmd = &cobra.Command{
 			}
 		}
 
-		// Mount BMAD multi-repo directories and generate agent instructions
-		bmadMounts, instructionContent, err := mount.AssembleBmadRepos(cfg)
+		// Mount BMAD multi-repo directories and/or render project-specific agent instructions
+		bmadMounts, instructionContent, err := mount.AssembleAgentInstructions(cfg)
 		if err != nil {
 			return err
 		}
@@ -88,12 +88,12 @@ var runCmd = &cobra.Command{
 		if instructionContent != "" {
 			tmpFile, err := os.CreateTemp("", "asbox-instructions-*.md")
 			if err != nil {
-				return fmt.Errorf("bmad_repos: failed to create temp instruction file: %w", err)
+				return fmt.Errorf("instruction file: failed to create temp instruction file: %w", err)
 			}
 			defer os.Remove(tmpFile.Name())
 			if _, err := tmpFile.WriteString(instructionContent); err != nil {
 				tmpFile.Close()
-				return fmt.Errorf("bmad_repos: failed to write instruction file: %w", err)
+				return fmt.Errorf("instruction file: failed to write instruction file: %w", err)
 			}
 			tmpFile.Close()
 
@@ -337,7 +337,7 @@ func agentInstructionTarget(agent string) (string, error) {
 	case "codex":
 		return "/home/sandbox/.codex/AGENTS.md", nil
 	default:
-		return "", fmt.Errorf("bmad_repos: unsupported agent %q for instruction file mount", agent)
+		return "", fmt.Errorf("instruction file: unsupported agent %q for instruction file mount", agent)
 	}
 }
 

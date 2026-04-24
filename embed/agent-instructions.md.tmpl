@@ -65,3 +65,9 @@ The following repositories are mounted for cross-repo development:
 - Do not attempt to push — all code review happens on the host.
 - Use inner containers for service dependencies (databases, caches, etc.).
 - Run tests inside the sandbox to validate changes before signaling completion.
+{{- if .ProjectExtension}}
+
+## Project-Specific Instructions
+
+{{.ProjectExtension}}
+{{- end}}

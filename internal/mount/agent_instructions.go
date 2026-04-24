@@ -21,19 +21,22 @@ type BmadRepoInfo struct {
 
 // InstructionData is the template data for rendering agent-instructions.md.tmpl.
 type InstructionData struct {
-	BmadRepos []BmadRepoInfo
+	BmadRepos        []BmadRepoInfo
+	ProjectExtension string
 }
 
-// AssembleBmadRepos validates bmad_repos paths, detects basename collisions,
-// generates mount flags, and renders agent instruction content from the
-// embedded template. Returns (mounts, instructionContent, error).
-func AssembleBmadRepos(cfg *config.Config) ([]string, string, error) {
-	if len(cfg.BmadRepos) == 0 {
+// AssembleAgentInstructions validates bmad_repos paths, detects basename
+// collisions, generates bmad_repos mount flags when configured, reads the
+// project-specific instruction extension when configured, and renders agent
+// instruction content from the embedded template. Returns
+// (mounts, instructionContent, error).
+func AssembleAgentInstructions(cfg *config.Config) ([]string, string, error) {
+	if len(cfg.BmadRepos) == 0 && cfg.AgentInstructions == "" {
 		return nil, "", nil
 	}
 
 	seen := make(map[string]string) // basename → full path
-	mounts := make([]string, 0, len(cfg.BmadRepos))
+	var mounts []string
 	repos := make([]BmadRepoInfo, 0, len(cfg.BmadRepos))
 
 	for _, repoPath := range cfg.BmadRepos {
@@ -75,20 +78,36 @@ func AssembleBmadRepos(cfg *config.Config) ([]string, string, error) {
 		})
 	}
 
+	var projectExtension string
+	if cfg.AgentInstructions != "" {
+		data, err := os.ReadFile(cfg.AgentInstructions)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil, "", &config.ConfigError{
+					Msg: fmt.Sprintf("agent_instructions path '%s' not found. Check agent_instructions in .asbox/config.yaml", cfg.AgentInstructions),
+				}
+			}
+			return nil, "", &config.ConfigError{
+				Msg: fmt.Sprintf("agent_instructions path '%s' is not readable: %s. Check agent_instructions in .asbox/config.yaml", cfg.AgentInstructions, err),
+			}
+		}
+		projectExtension = string(data)
+	}
+
 	// Render agent instructions template
 	tmplBytes, err := asboxEmbed.Assets.ReadFile("agent-instructions.md.tmpl")
 	if err != nil {
-		return nil, "", fmt.Errorf("bmad_repos: failed to read agent instructions template: %w", err)
+		return nil, "", fmt.Errorf("agent instructions: failed to read agent instructions template: %w", err)
 	}
 
 	tmpl, err := template.New("agent-instructions").Parse(string(tmplBytes))
 	if err != nil {
-		return nil, "", fmt.Errorf("bmad_repos: failed to parse agent instructions template: %w", err)
+		return nil, "", fmt.Errorf("agent instructions: failed to parse agent instructions template: %w", err)
 	}
 
 	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, InstructionData{BmadRepos: repos}); err != nil {
-		return nil, "", fmt.Errorf("bmad_repos: failed to render agent instructions: %w", err)
+	if err := tmpl.Execute(&buf, InstructionData{BmadRepos: repos, ProjectExtension: projectExtension}); err != nil {
+		return nil, "", fmt.Errorf("agent instructions: failed to render agent instructions: %w", err)
 	}
 
 	return mounts, buf.String(), nil

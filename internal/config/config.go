@@ -38,18 +38,19 @@ var AgentConfigRegistry = map[string]AgentConfigMapping{
 
 // Config represents the top-level asbox configuration.
 type Config struct {
-	InstalledAgents []string          `yaml:"installed_agents"`
-	DefaultAgent    string            `yaml:"default_agent"`
-	ProjectName     string            `yaml:"project_name"`
-	SDKs            SDKConfig         `yaml:"sdks"`
-	Packages        []string          `yaml:"packages"`
-	MCP             []string          `yaml:"mcp"`
-	Mounts          []MountConfig     `yaml:"mounts"`
-	Secrets         []string          `yaml:"secrets"`
-	Env             map[string]string `yaml:"env"`
-	AutoIsolateDeps bool              `yaml:"auto_isolate_deps"`
-	HostAgentConfig *bool             `yaml:"host_agent_config"`
-	BmadRepos       []string          `yaml:"bmad_repos"`
+	InstalledAgents   []string          `yaml:"installed_agents"`
+	DefaultAgent      string            `yaml:"default_agent"`
+	ProjectName       string            `yaml:"project_name"`
+	SDKs              SDKConfig         `yaml:"sdks"`
+	Packages          []string          `yaml:"packages"`
+	MCP               []string          `yaml:"mcp"`
+	Mounts            []MountConfig     `yaml:"mounts"`
+	Secrets           []string          `yaml:"secrets"`
+	Env               map[string]string `yaml:"env"`
+	AutoIsolateDeps   bool              `yaml:"auto_isolate_deps"`
+	HostAgentConfig   *bool             `yaml:"host_agent_config"`
+	BmadRepos         []string          `yaml:"bmad_repos"`
+	AgentInstructions string            `yaml:"agent_instructions"`
 }
 
 // SDKConfig specifies SDK versions to install in the sandbox.

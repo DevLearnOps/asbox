@@ -680,7 +680,7 @@ bmad_repos:
 	}
 }
 
-func TestRun_bmadReposConfigured_assembleBmadReposCalled(t *testing.T) {
+func TestRun_bmadReposConfigured_assembleAgentInstructionsCalled(t *testing.T) {
 	dir := t.TempDir()
 	repoDir := filepath.Join(dir, "myrepo")
 	os.Mkdir(repoDir, 0o755)
@@ -702,7 +702,7 @@ bmad_repos:
 		t.Fatalf("unexpected mount error: %v", err)
 	}
 
-	bmadMounts, instructionContent, err := mount.AssembleBmadRepos(cfg)
+	bmadMounts, instructionContent, err := mount.AssembleAgentInstructions(cfg)
 	if err != nil {
 		t.Fatalf("unexpected bmad error: %v", err)
 	}
@@ -734,7 +734,7 @@ installed_agents: [claude]
 		t.Fatalf("unexpected parse error: %v", err)
 	}
 
-	bmadMounts, content, err := mount.AssembleBmadRepos(cfg)
+	bmadMounts, content, err := mount.AssembleAgentInstructions(cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -743,6 +743,74 @@ installed_agents: [claude]
 	}
 	if content != "" {
 		t.Errorf("expected empty content when bmad_repos empty, got %q", content)
+	}
+}
+
+func TestRun_agentInstructionsConfigured_extensionMountCreated(t *testing.T) {
+	dir := t.TempDir()
+	fixturePath := filepath.Join(dir, "fixture.md")
+	body := "Always run `go test ./...`.\n"
+	if err := os.WriteFile(fixturePath, []byte(body), 0o644); err != nil {
+		t.Fatalf("failed to write fixture: %v", err)
+	}
+
+	cfgPath := writeRunConfig(t, dir, `
+installed_agents: [claude]
+agent_instructions: ../fixture.md
+`)
+
+	cfg, err := config.Parse(cfgPath)
+	if err != nil {
+		t.Fatalf("unexpected parse error: %v", err)
+	}
+
+	mounts, content, err := mount.AssembleAgentInstructions(cfg)
+	if err != nil {
+		t.Fatalf("unexpected agent instructions error: %v", err)
+	}
+	if mounts != nil {
+		t.Errorf("mounts = %v, want nil", mounts)
+	}
+	if content == "" {
+		t.Fatal("expected non-empty instruction content")
+	}
+	if !strings.Contains(content, "## Project-Specific Instructions") {
+		t.Errorf("instruction content should contain project-specific heading, got:\n%s", content)
+	}
+	if !strings.Contains(content, body) {
+		t.Errorf("instruction content should contain fixture body, got:\n%s", content)
+	}
+}
+
+func TestRun_agentInstructionsMissingFile_returnsConfigError(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := writeRunConfig(t, dir, `
+installed_agents: [claude]
+agent_instructions: ../missing-agent-instructions.md
+`)
+
+	old := configFile
+	configFile = cfgPath
+	t.Cleanup(func() { configFile = old })
+
+	r := newRootCmd()
+	err := r.run("run")
+	if err == nil {
+		t.Fatal("expected error for missing agent_instructions path, got nil")
+	}
+
+	var ce *config.ConfigError
+	if !errors.As(err, &ce) {
+		t.Fatalf("expected *config.ConfigError, got %T: %v", err, err)
+	}
+	if got := exitCode(err); got != 1 {
+		t.Errorf("exitCode = %d, want 1", got)
+	}
+
+	wantPath := filepath.Join(dir, "missing-agent-instructions.md")
+	want := "agent_instructions path '" + wantPath + "' not found. Check agent_instructions in .asbox/config.yaml"
+	if err.Error() != want {
+		t.Errorf("error = %q, want %q", err.Error(), want)
 	}
 }
 

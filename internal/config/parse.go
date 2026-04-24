@@ -205,6 +205,9 @@ func Parse(configPath string) (*Config, error) {
 	for i := range cfg.BmadRepos {
 		cfg.BmadRepos[i] = resolvePath(configDir, cfg.BmadRepos[i])
 	}
+	if cfg.AgentInstructions != "" {
+		cfg.AgentInstructions = resolvePath(configDir, cfg.AgentInstructions)
+	}
 
 	return &cfg, nil
 }

@@ -2,7 +2,7 @@
 
 Consolidated from code reviews across all stories. Organized by category. Duplicates merged. Resolved items removed.
 
-Last updated: 2026-04-20 (code review of story 14-2)
+Last updated: 2026-04-24 (code review of story 16-1)
 
 ---
 
@@ -127,3 +127,8 @@ Last updated: 2026-04-20 (code review of story 14-2)
 - `ast-grep` zip extraction assumes a flat layout at `/tmp/ast-grep/ast-grep`. Upstream could reshape the archive on a future version bump (e.g., nest under `ast-grep-<version>/`). No `find` probe; failure is loud at build time but only when building. A local layout-verification line would harden for bumps. [embed/Dockerfile.tmpl:222-223]
 - `TestRender_toolchainNoDynamicLatest` negative assertions (`!api.github.com`, `!releases/latest`, `!| bash`) only pass because the exploration-tools maintenance procedure sits inside the `{{- /* ... */ -}}` header wrapper, which Go-template stripping removes before assertions run. Splitting or relocating the header outside the wrapper flips the test red with no functional regression. Consider per-line guards that only scan rendered (post-strip) content explicitly. [internal/template/render_test.go:590-610]
 - Integration-test helper replaces the sandbox entrypoint with `tail -f /dev/null`, so `persist_env`/`/etc/profile.d/sandbox-env.sh` never runs and `GIT_AUTHOR_*` is never set. Today only `git init -q` is used, which works without identity; any future test that calls `git commit` (e.g., to exercise rg/fd against tracked files) will fail with "Author identity unknown". Systemic — affects all integration tests, not just 14.2. [integration/toolchain_test.go, `startTestContainer` helper]
+
+## Deferred from: code review of 16-1-configurable-agent-instructions-extension (2026-04-24)
+
+- `resolvePath` in `internal/config/parse.go:214-224` silently swallows `os.UserHomeDir()` errors when expanding a `~/` prefix. If `HOME`/`USERPROFILE` is unset, `filepath.Join(configDir, "~/foo")` produces the nonsense path `<configDir>/~/foo`, which later surfaces as a confusing "not found" error rather than a targeted "HOME unset" diagnostic. Affects `mounts`, `bmad_repos`, and now `agent_instructions` equally; not caused by story 16.1. [internal/config/parse.go:214-224]
+- `agent_instructions` pointing to a directory produces the generic error `"agent_instructions path 'X' is not readable: read X: is a directory. Check agent_instructions in .asbox/config.yaml"`. Functionally fail-closed, but inconsistent with `bmad_repos`, which guards non-directory paths explicitly. Adding an `os.Stat` + `IsDir()` pre-check would produce a clearer diagnostic. Not required by any AC. [internal/mount/agent_instructions.go:82-95]

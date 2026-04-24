@@ -561,6 +561,43 @@ mounts:
 	}
 }
 
+func TestParse_agentInstructionsRelativePath(t *testing.T) {
+	dir := t.TempDir()
+	cfg := writeConfig(t, dir, `
+installed_agents: [claude]
+agent_instructions: ../AGENT_INSTRUCTIONS.md
+`)
+
+	parsed, err := Parse(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expected := filepath.Join(dir, "..", "AGENT_INSTRUCTIONS.md")
+	if parsed.AgentInstructions != expected {
+		t.Errorf("AgentInstructions = %q, want %q", parsed.AgentInstructions, expected)
+	}
+}
+
+func TestParse_agentInstructionsTildeExpansion(t *testing.T) {
+	dir := t.TempDir()
+	cfg := writeConfig(t, dir, `
+installed_agents: [claude]
+agent_instructions: ~/agent-notes.md
+`)
+
+	parsed, err := Parse(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	home, _ := os.UserHomeDir()
+	expected := filepath.Join(home, "agent-notes.md")
+	if parsed.AgentInstructions != expected {
+		t.Errorf("AgentInstructions = %q, want %q", parsed.AgentInstructions, expected)
+	}
+}
+
 func TestParse_projectNameFallback(t *testing.T) {
 	// Config at root-like path where dir name sanitizes to empty
 	tmp := t.TempDir()

@@ -62,3 +62,8 @@ env:
 # bmad_repos:
 #   - ../other-repo
 #   - ../shared-libs
+
+# Optional: append project-specific instructions to the generated agent
+# instruction file (CLAUDE.md / GEMINI.md / AGENTS.md). Path is resolved
+# relative to this config file. Fail-closed on missing/unreadable file.
+# agent_instructions: ../AGENT_INSTRUCTIONS.md
