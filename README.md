@@ -1,6 +1,6 @@
 # asbox
 
-Containerized development environment for AI coding agents. asbox (Agent-SandBox) gives Claude Code and Gemini CLI full development capability — git, Docker, SDKs, MCP servers — while isolating them from your host system. Assign a task, disconnect, and come back to working code.
+Containerized development environment for AI coding agents. asbox (Agent-SandBox) gives Claude Code, Gemini CLI, and OpenAI Codex full development capability — git, Docker, SDKs, MCP servers — while isolating them from your host system. Assign a task, disconnect, and come back to working code.
 
 ## Table of Contents
 
@@ -11,6 +11,7 @@ Containerized development environment for AI coding agents. asbox (Agent-SandBox
 - [Configuration](#configuration)
 - [Usage Patterns](#usage-patterns)
 - [Isolation Model](#isolation-model)
+- [Installed Tooling](#installed-tooling)
 - [Build Caching](#build-caching)
 - [Testing](#testing)
 - [Project Structure](#project-structure)
@@ -20,18 +21,18 @@ Containerized development environment for AI coding agents. asbox (Agent-SandBox
 
 Without asbox, delegating multi-step tasks to AI agents requires constant supervision — permission prompts, approval gates, and risk of host contamination. asbox constrains the environment itself so the agent operates freely within safe boundaries:
 
-- **No permission prompts** — the agent runs with `--dangerously-skip-permissions` inside the container
+- **No permission prompts** — agents run with their "skip permissions" flags inside the container (`--dangerously-skip-permissions` for Claude, `-y` for Gemini, `--dangerously-bypass-approvals-and-sandbox` for Codex)
 - **No host side effects** — only explicitly declared mounts, secrets, and env vars are accessible
-- **No accidental pushes** — git push is blocked at the wrapper level
-- **Full dev environment** — Node.js, Python, Go, Docker Compose, MCP servers all available inside
+- **No accidental pushes** — `git push` is blocked at the wrapper level
+- **Full dev environment** — Node.js, Python, Go, Podman + Docker Compose, MCP servers, plus a pre-installed DevOps and code exploration toolchain
 
 ## Prerequisites
 
 | Dependency | Minimum Version | Notes |
 |---|---|---|
-| Docker Engine or Podman | 20.10+ | Used to build and run the asbox container |
+| Docker Engine or Docker Desktop | 20.10+ | Used to build and run the asbox container on the host |
 
-asbox is a single Go binary with no other runtime dependencies. It validates Docker or Podman availability at startup and exits with code `3` if missing or too old.
+asbox is a single Go binary with no other runtime dependencies. It validates that a `docker` command is on `PATH` at startup and exits with code `3` if missing. Podman is used *inside* the sandbox for inner container workloads — it is not a host-side replacement for Docker.
 
 ## Quick Start
 
@@ -47,7 +48,8 @@ make install    # Installs to ~/.local/bin/asbox
 cd ~/my-project
 asbox init
 
-# 3. Edit .asbox/config.yaml — set your agent, SDKs, secrets
+# 3. Edit .asbox/config.yaml — uncomment the agents you want installed,
+#    set SDK versions, declare secrets
 
 # 4. Build and run
 asbox run
@@ -58,7 +60,7 @@ asbox run
 ## CLI Reference
 
 ```
-asbox [command] [-f <config-path>]
+asbox [command] [flags]
 ```
 
 ### Commands
@@ -82,16 +84,20 @@ asbox build --no-cache               # Force full rebuild, bypass cache
 
 Renders the Dockerfile template, computes a content hash, and tags the image as `asbox-<project>:<hash>`. Skips the build entirely if an image with the same hash already exists. Use `--no-cache` to force a complete rebuild, bypassing both the content-hash check and Docker layer cache.
 
-**`asbox run`** — Launch an interactive sandbox session.
+**`asbox run [agent]`** — Launch an interactive sandbox session.
 
 ```bash
-asbox run                            # Uses .asbox/config.yaml
+asbox run                            # Uses configured default_agent
+asbox run claude                     # Override default agent (positional)
+asbox run -a gemini                  # Override default agent (flag form)
 asbox run -f configs/gpu.yaml        # Uses custom config
 asbox run --no-cache                 # Force rebuild before running
 asbox run --fetch                    # Fetch origin refs for mounted repos before launch
 ```
 
 Validates that all declared secrets exist in your host environment, auto-builds if needed, then starts the container in TTY mode with the configured agent as the foreground process. Press `Ctrl+C` to stop cleanly — Tini handles signal forwarding with no orphaned processes.
+
+The optional `[agent]` positional argument (or `-a/--agent` flag — using both at once is an error) overrides the configured default for this session. The agent must already be listed in `installed_agents`, otherwise the launch fails with a config error.
 
 ### Global Flags
 
@@ -101,19 +107,39 @@ Validates that all declared secrets exist in your host environment, auto-builds 
 | `-h, --help` | Display usage information |
 | `-v, --version` | Display version |
 
+### Run-Specific Flags
+
+| Flag | Description |
+|---|---|
+| `-a, --agent <name>` | Override default agent for this session (`claude`, `gemini`, or `codex`). Also accepted as a positional argument. |
+| `--no-cache` | Force a rebuild before launch, bypassing content-hash and Docker layer caches |
+| `--fetch` | Run `git fetch origin` in every mounted repo (project + `bmad_repos`) before launch, using host credentials. Refs-only — never touches the working tree. Non-fatal on failure. |
+
+### Environment Variables
+
+| Variable | Applies To | Description |
+|---|---|---|
+| `ASBOX_FETCH_TIMEOUT` | `asbox run --fetch` | Per-repo fetch timeout as a Go duration string (`60s`, `2m`, `500ms`). Must be positive. Defaults to the built-in timeout when unset. |
+
 ## Configuration
 
 `asbox init` generates `.asbox/config.yaml` with sensible defaults and inline comments. Here is the full schema:
 
 ```yaml
-# Required — which agent runs inside the sandbox
-agent: claude-code                # "claude-code" or "gemini-cli"
+# Required — agents to install in the sandbox image (at least one)
+installed_agents:
+  - claude
+  # - gemini
+  # - codex
+
+# Optional — which agent to launch by default (defaults to first in installed_agents)
+# default_agent: claude
 
 # Optional — SDK versions to install
 sdks:
   nodejs: "22"
   python: "3.12"
-  go: "1.22"
+  # go: "1.26.0"
 
 # Optional — system packages (apt-get)
 packages:
@@ -122,44 +148,60 @@ packages:
   - wget
   - git
   - jq
+  - yq
 
 # Optional — host directories to mount
+# Source paths are resolved relative to this config file's directory.
+# For .asbox/config.yaml in a project root, ".." points to the project root.
 mounts:
-  - source: "."                   # Relative to config file directory
-    target: "/workspace"          # Absolute path inside container
+  - source: ".."
+    target: "/workspace"
 
 # Optional — auto-detect package.json and isolate node_modules via named volumes
 # auto_isolate_deps: true
 
 # Optional — host env vars to inject (names only, values read at runtime)
-secrets:
-  - ANTHROPIC_API_KEY
-  - GITHUB_TOKEN
+# secrets:
+#   - ANTHROPIC_API_KEY
+#   - GITHUB_TOKEN
 
-# Optional — non-secret env vars
+# Optional — non-secret env vars (e.g., Git identity for in-sandbox commits)
 env:
-  NODE_ENV: development
+  GIT_AUTHOR_NAME: "Sandbox User"
+  GIT_AUTHOR_EMAIL: "sandbox@localhost"
+  GIT_COMMITTER_NAME: "Sandbox User"
+  GIT_COMMITTER_EMAIL: "sandbox@localhost"
+  # NODE_ENV: development
 
 # Optional — MCP servers to pre-install
-mcp:
-  - playwright                    # Installs @playwright/mcp with browser deps
+# mcp:
+#   - playwright               # Installs @playwright/mcp with browser deps
 
-# Optional — share host agent config (OAuth/SSO tokens)
-# host_agent_config:
-#   source: "~/.claude"
-#   target: "/opt/claude-config"
+# Optional — disable mounting the host agent config directory (enabled by default).
+# When enabled, asbox auto-resolves the host path per default agent:
+#   claude → ~/.claude,  gemini → ~/.gemini,  codex → ~/.codex
+# host_agent_config: false
 
 # Optional — BMAD multi-repo mounts for cross-repo workflows
+# Mounted under /workspace/repos/<basename> inside the sandbox.
 # bmad_repos:
 #   - ../other-repo
 #   - ../shared-libs
+
+# Optional — append project-specific instructions to the generated agent
+# instruction file (CLAUDE.md / GEMINI.md / .codex/AGENTS.md). Path is
+# resolved relative to this config file. Fails closed if the file is missing.
+# agent_instructions: ../AGENT_INSTRUCTIONS.md
 ```
 
 ### Key Behaviors
 
-- **Mount paths resolve relative to the config file**, not your working directory. This makes configs portable across machines.
+- **Agents are a list.** `installed_agents` controls what gets baked into the image; `default_agent` (optional) controls which one launches by default. If `default_agent` is omitted, the first installed agent wins.
+- **`gemini` and `codex` require Node.js.** Both are installed via `npm`, so `sdks.nodejs` must be set when either is in `installed_agents`. Parsing fails otherwise.
+- **Mount source paths resolve relative to the config file**, not your working directory. This makes configs portable across machines.
+- **Host agent config is mounted by default.** asbox mounts `~/.claude` / `~/.gemini` / `~/.codex` (matching the default agent) so OAuth/SSO tokens flow into the container. Set `host_agent_config: false` to disable.
 - **Secrets are names only** — values are never written to config, image, or build cache. asbox reads them from your host environment at `run` time and injects via `--env` flags.
-- **Env values must be single-line** — multiline YAML values break the key/value parser.
+- **Env values must be single-line** — newline or null byte characters are rejected at parse time because they could inject Dockerfile directives.
 - **Empty lists are valid** — omitting `sdks`, `packages`, or `secrets` entirely is fine.
 
 ## Usage Patterns
@@ -169,7 +211,7 @@ mcp:
 The primary workflow. Mount your project, hand the agent a task, walk away.
 
 ```bash
-# Config: mount project root, inject API key
+# Config: installed_agents: [claude], mount project root, inject API key
 asbox run
 # Inside sandbox: agent has full git, Node.js, tests, etc.
 # Agent commits to local branch — you review the diff later
@@ -177,7 +219,27 @@ asbox run
 
 The agent works in a local git clone inside the container. All commits stay local since `git push` is blocked. Review the branch after the session.
 
-### Pattern 2: Multiple Config Profiles
+### Pattern 2: Multiple Agents in One Image
+
+Install more than one agent and switch between them without rebuilding.
+
+```yaml
+installed_agents:
+  - claude
+  - gemini
+  - codex
+default_agent: claude
+```
+
+```bash
+asbox run               # launches claude (default)
+asbox run gemini        # launches gemini from the same image
+asbox run -a codex      # same, via flag form
+```
+
+All three agents live in the same image; switching is just a different entrypoint command — no rebuild required.
+
+### Pattern 3: Multiple Config Profiles
 
 Maintain different configs for different workloads in the same project.
 
@@ -191,34 +253,44 @@ asbox run -f .asbox/backend.yaml
 
 Each config produces a separately cached image, so switching profiles doesn't trigger unnecessary rebuilds.
 
-### Pattern 3: BMAD Planning + Implementation
+### Pattern 4: BMAD Planning + Implementation
 
 Mount the BMAD output folder so the agent can read planning artifacts and write implementation artifacts during story execution.
 
 ```yaml
 mounts:
-  - source: "."
+  - source: ".."
     target: "/workspace"
-  - source: "./_bmad-output"
+  - source: "../_bmad-output"
     target: "/workspace/_bmad-output"
 ```
 
 The agent reads PRDs, architecture docs, and story specs, then implements with full context.
 
-### Pattern 4: Inner Container Development
+For cross-repo work, use `bmad_repos` to mount sibling repositories under `/workspace/repos/<name>`:
+
+```yaml
+bmad_repos:
+  - ../frontend
+  - ../backend
+```
+
+Combine with `asbox run --fetch` to refresh `origin` refs in every mounted repo before launch.
+
+### Pattern 5: Inner Container Development
 
 The sandbox includes Podman (rootless) and Docker Compose v2. Agents can build and run containers inside the sandbox without access to your host Docker daemon.
 
 ```yaml
-# No special config needed — Podman is always available
-agent: claude-code
+installed_agents:
+  - claude
 sdks:
   nodejs: "22"
 ```
 
-Inside the sandbox, `docker` is aliased to `podman`. The agent runs `docker compose up`, integration tests against local services, and tears everything down — all isolated within the sandbox's own network namespace.
+Inside the sandbox, `docker` is aliased to `podman`. The agent runs `docker compose up`, integration tests against local services, and tears everything down — all isolated within the sandbox's own network namespace. Testcontainers-go works out of the box via a pre-configured Podman socket.
 
-### Pattern 5: MCP-Enabled Browser Automation
+### Pattern 6: MCP-Enabled Browser Automation
 
 Pre-install the Playwright MCP server so the agent can interact with web pages.
 
@@ -229,7 +301,17 @@ mcp:
 
 At container startup, the entrypoint generates `.mcp.json` in the workspace root from a build-time manifest. If your project already has an `.mcp.json`, the two are merged — your project config wins on key conflicts.
 
-### Pattern 6: Team Onboarding
+### Pattern 7: Project-Specific Agent Instructions
+
+Append custom guidance to the generated agent instruction file (`CLAUDE.md`, `GEMINI.md`, or `.codex/AGENTS.md`):
+
+```yaml
+agent_instructions: ../AGENT_INSTRUCTIONS.md
+```
+
+The file's contents are rendered into the built-in template under a "Project-Specific Instructions" section. The path is resolved relative to the config file and fails closed if missing.
+
+### Pattern 8: Team Onboarding
 
 Commit `.asbox/config.yaml` to your repo. New team members get a working sandbox environment with one command.
 
@@ -252,11 +334,32 @@ asbox protects against **accidental** agent mistakes (hallucinations, runaway co
 | **Filesystem** | Only declared mounts are visible | No access to `~/.ssh`, `~/.aws`, or host home directory |
 | **Credentials** | Only declared secrets injected via `--env` | No implicit access to host env vars, tokens, or keys |
 | **Network (inner containers)** | Podman rootless networking | Inner container ports unreachable from host; internet access preserved |
-| **Docker daemon** | Podman replaces Docker | No host Docker socket mount, no `--privileged`, fully daemonless |
+| **Docker daemon** | Podman replaces Docker inside the sandbox | No host Docker socket mount, no `--privileged`, fully daemonless |
 
 ### Tamper Resistance
 
 Isolation scripts (`git-wrapper.sh`, `entrypoint.sh`) are embedded in the Go binary at build time and baked into the image owned by root. The non-root sandbox user cannot modify them at runtime.
+
+## Installed Tooling
+
+Every sandbox image ships with a pinned toolchain so agents can validate changes without pulling more binaries at runtime.
+
+**Runtime foundation**
+- Tini (PID 1), sudo, build-essential, curl, wget, jq, unzip, zip, less, vim, dnsutils, ca-certificates, gosu
+- Podman (rootless) + `podman-docker` compat shim, Docker Compose v2, aardvark-dns, netavark
+
+**DevOps validation**
+- `kubectl`, `helm`, `kustomize`, `yq`, `opentofu` (`tofu`), `tflint`, `kubeconform`, `kube-linter`, `trivy`, `flux`, `sops`
+
+**Code exploration**
+- `rg` (ripgrep), `fd` (fd-find), `ast-grep`, `ctags` (universal-ctags)
+
+**Optional per-config**
+- Node.js / Python / Go SDKs via `sdks:` (pinned to the versions you specify)
+- Agent CLIs — Claude Code, Gemini CLI (`@google/gemini-cli`), OpenAI Codex (`@openai/codex`) — installed only when listed in `installed_agents`
+- Playwright MCP (`@playwright/mcp`) with Chromium + WebKit browsers when `mcp: [playwright]`
+
+Pinned versions live in the Dockerfile template header (`embed/Dockerfile.tmpl`), along with the update procedure for each tool.
 
 ## Build Caching
 
@@ -288,36 +391,38 @@ make test-integration   # or: go test -v ./integration/...
 make test-ci
 ```
 
-Unit tests cover configuration parsing, template rendering, hash computation, and CLI flag handling. Integration tests use real containers to validate the full lifecycle: image build, container startup, mount isolation, git push blocking, inner container orchestration, MCP configuration, and dependency isolation.
+Unit tests cover configuration parsing, template rendering, hash computation, mount assembly, git-fetch orchestration, and CLI flag handling. Integration tests use real containers to validate the full lifecycle: image build, container startup, mount isolation, git push blocking, inner container orchestration, MCP configuration, and dependency isolation.
 
 ## Project Structure
 
 ```
 asbox/
-├── main.go                     # Entry point
-├── go.mod / go.sum             # Module definition
-├── Makefile                    # Build targets (build, install, test, test-integration)
-├── cmd/                        # Cobra command definitions
-│   ├── root.go                 # Root command, global flags
-│   ├── init.go                 # asbox init
-│   ├── build.go                # asbox build
-│   └── run.go                  # asbox run
-├── internal/                   # Private application logic
-│   ├── config/                 # YAML parsing, validation, typed structs
-│   ├── template/               # Dockerfile template rendering + validation
-│   ├── docker/                 # Docker/Podman CLI interaction via os/exec
-│   ├── hash/                   # Content-hash computation for image caching
-│   └── mount/                  # Mount assembly, auto_isolate_deps, bmad_repos
-├── embed/                      # Embedded asset source files
-│   ├── Dockerfile.tmpl         # Go text/template Dockerfile
-│   ├── entrypoint.sh           # Container entrypoint
-│   ├── git-wrapper.sh          # Git push interceptor
-│   ├── healthcheck-poller.sh   # Healthcheck daemon
+├── main.go                         # Entry point
+├── go.mod / go.sum                 # Module definition
+├── Makefile                        # Build targets (build, install, test, test-integration, test-ci)
+├── cmd/                            # Cobra command definitions
+│   ├── root.go                     # Root command, global flags, exit-code mapping
+│   ├── init.go                     # asbox init
+│   ├── build.go                    # asbox build
+│   ├── build_helper.go             # Shared build/ensureBuild logic
+│   └── run.go                      # asbox run
+├── internal/                       # Private application logic
+│   ├── config/                     # YAML parsing, validation, typed structs, agent registry
+│   ├── template/                   # Dockerfile template rendering + validation
+│   ├── docker/                     # Docker CLI interaction via os/exec
+│   ├── hash/                       # Content-hash computation for image caching
+│   ├── mount/                      # Mount assembly, auto_isolate_deps, bmad_repos, agent instructions
+│   └── gitfetch/                   # Concurrent `git fetch origin` for --fetch
+├── embed/                          # Embedded asset source files
+│   ├── Dockerfile.tmpl             # Go text/template Dockerfile
+│   ├── entrypoint.sh               # Container entrypoint
+│   ├── git-wrapper.sh              # Git push interceptor
+│   ├── healthcheck-poller.sh       # Healthcheck daemon
 │   ├── agent-instructions.md.tmpl  # Agent instruction template
-│   └── config.yaml             # Starter config for asbox init
-├── integration/                # Integration tests (Go testing + testcontainers-go)
+│   └── config.yaml                 # Starter config for asbox init
+├── integration/                    # Integration tests (Go testing + testcontainers-go)
 └── .asbox/
-    config.yaml                 # Your project-specific config
+    └── config.yaml                 # Your project-specific config
 ```
 
 ## Exit Codes
@@ -325,7 +430,7 @@ asbox/
 | Code | Meaning |
 |---|---|
 | `0` | Success |
-| `1` | General error (missing config, invalid values) |
-| `2` | Usage error (unknown command, missing flag argument) |
+| `1` | General error (missing config, invalid values, build failure, run failure) |
+| `2` | Usage error (unknown command, missing flag argument, conflicting agent flags) |
 | `3` | Dependency error (missing Docker) |
 | `4` | Secret validation error (declared secret not found in host env) |
