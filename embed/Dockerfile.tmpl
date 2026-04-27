@@ -5,7 +5,7 @@ Current pinned versions:
 - Base image: ubuntu:24.04@sha256:c4a8d5503dfb2a3eb8ab5f807da5bc69a85730fb49b5cfca2330194ebcc41c7b
 - Docker Compose: v5.0.1
 - @google/gemini-cli: 0.39.1
-- @openai/codex: 0.124.0
+- @openai/codex: 0.125.0
 - @playwright/mcp: 0.0.70
 
 Pinned validation tools:
@@ -295,7 +295,7 @@ RUN npm install -g @google/gemini-cli@0.39.1 && \
 {{- end}}
 {{- if eq . "codex"}}
 
-RUN npm install -g @openai/codex@0.124.0 && \
+RUN npm install -g @openai/codex@0.125.0 && \
     chown -R sandbox:sandbox /home/sandbox/.npm-global
 {{- end}}
 {{- end}}
